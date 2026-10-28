@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.astro/
+src/data/
+.env
+.env.local
+
+# Prototipo de referencia
+*.zip

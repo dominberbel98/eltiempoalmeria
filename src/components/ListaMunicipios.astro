@@ -1,0 +1,38 @@
+---
+import { ArrowUpRight } from "lucide-react";
+import IconoCielo from "./IconoCielo";
+import type { Ficha } from "../lib/resumen";
+import { fmt } from "../lib/tiempo";
+
+type Props = { fichas: (Ficha & { km?: number })[]; titulo: string; actual?: string };
+const { fichas, titulo, actual } = Astro.props;
+const base = import.meta.env.BASE_URL;
+---
+
+<div class="place-list">
+  <div class="list-title"><span>{titulo}</span><small>{fichas.length} municipios</small></div>
+  <ul style="list-style:none;margin:0;padding:0">
+    {
+      fichas.map(({ municipio: m, prevision: p, km }) => (
+        <li>
+          <a href={`${base}${m.slug}/`} aria-current={m.slug === actual ? "page" : undefined}>
+            <span class="place-icon">
+              {p.actual ? <IconoCielo cielo={p.actual.cielo} noche={p.actual.noche} size={18} /> : null}
+            </span>
+            <span>
+              {m.nombre}
+              <small>{km != null ? `a ${Math.round(km)} km · ${m.altitud} m` : `${m.altitud} m · ${p.actual?.cieloTxt ?? "sin datos"}`}</small>
+            </span>
+            <span class="place-temp">
+              {fmt(p.actual?.temp, "°")}{" "}
+              <small>
+                {fmt(p.dias[0]?.max, "°")}/{fmt(p.dias[0]?.min, "°")}
+              </small>
+            </span>
+            <ArrowUpRight size={16} aria-hidden="true" />
+          </a>
+        </li>
+      ))
+    }
+  </ul>
+</div>

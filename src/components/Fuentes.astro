@@ -1,0 +1,61 @@
+---
+import { ArrowUpRight } from "lucide-react";
+import { getMeta } from "../lib/datos";
+import { fechaHoraActualizacion } from "../lib/tiempo";
+
+type Props = { id?: string; nombre?: string; aemet?: boolean; elaborado?: string | null };
+const { id, nombre, aemet, elaborado } = Astro.props;
+const meta = getMeta();
+const fallos = meta.fallosAemet.length;
+---
+
+<section id="fuentes" class="sources">
+  <div class="source-intro">
+    <span class="eyebrow">CON LOS PIES EN LA TIERRA</span>
+    <h2>Un cielo bonito.<br />Datos transparentes.</h2>
+    <p>
+      El tiempo cambia. Por eso te contamos de dónde sale cada dato y cuándo se ha consultado. La web se regenera cada hora con
+      los últimos datos publicados.
+    </p>
+  </div>
+  <div class="source-detail">
+    <div>
+      <span class="source-number">01</span>
+      <div>
+        <h3>Predicción oficial · AEMET</h3>
+        {
+          nombre ? (
+            <p>
+              {aemet
+                ? `Temperatura, sensación térmica, humedad, precipitación y estado del cielo de ${nombre} proceden de la predicción municipal de AEMET${elaborado ? ` (elaborada el ${elaborado.slice(8, 10)}/${elaborado.slice(5, 7)} a las ${elaborado.slice(11, 16)})` : ""}.`
+                : `En esta actualización no hay predicción de AEMET disponible para ${nombre}; toda la previsión procede del modelo Open-Meteo.`}
+            </p>
+          ) : (
+            <p>
+              Predicción municipal diaria y horaria de AEMET para los 103 municipios.
+              {fallos > 0 && ` En esta actualización faltan ${fallos} municipios, que se muestran con datos de Open-Meteo.`}
+            </p>
+          )
+        }
+        <a class="text-link" rel="noopener" href={`https://www.aemet.es/es/eltiempo/prediccion/municipios?id=${id ?? "04013"}`}>
+          Previsión municipal en aemet.es <ArrowUpRight size={14} aria-hidden="true" />
+        </a>
+        <a class="text-link" rel="noopener" href="https://www.aemet.es/es/eltiempo/prediccion/avisos">
+          Avisos oficiales para Almería <ArrowUpRight size={14} aria-hidden="true" />
+        </a>
+      </div>
+    </div>
+    <div>
+      <span class="source-number">02</span>
+      <div>
+        <h3>Modelo horario · Open-Meteo</h3>
+        <p>
+          Viento, rachas, dirección, índice UV, nubosidad y probabilidad horaria de precipitación proceden de{" "}
+          <a href="https://open-meteo.com/" rel="noopener">Open-Meteo</a>, calculados para las coordenadas de cada municipio. Son
+          estimaciones de modelo, no lecturas de estación.
+        </p>
+        <small>Última descarga: {fechaHoraActualizacion(meta.updatedAt)}</small>
+      </div>
+    </div>
+  </div>
+</section>

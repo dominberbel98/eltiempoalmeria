@@ -1,0 +1,35 @@
+---
+import { MapPin } from "lucide-react";
+import Base from "../layouts/Base.astro";
+import ListaMunicipios from "../components/ListaMunicipios.astro";
+import MapaProvincia from "../components/MapaProvincia";
+import { fichas } from "../lib/resumen";
+
+const base = import.meta.env.BASE_URL;
+---
+
+<Base
+  title="Mapa del tiempo en Almería por horas: lluvia y viento por municipio"
+  description="Mapa de la provincia de Almería con la previsión hora a hora de lluvia, probabilidad de precipitación, viento, rachas y temperatura en cada uno de sus 103 municipios."
+  activo="mapa"
+>
+  <section class="intro">
+    <div>
+      <div class="eyebrow">LAS PRÓXIMAS 48 HORAS</div>
+      <h1>El mapa, <em>hora a hora.</em></h1>
+      <p>Lluvia y viento en cada término municipal de la provincia.</p>
+    </div>
+  </section>
+  <section id="provincia" class="province-section" aria-label="Mapa por horas" style="border-top:0;padding-top:0">
+    <div class="province-content mapa-grande">
+      <MapaProvincia client:load base={base} />
+      <ListaMunicipios fichas={fichas()} titulo="Toda Almería" />
+    </div>
+    <div class="map-foot">
+      <MapPin size={13} aria-hidden="true" /><span
+        >Cada área es un término municipal (límites IGN). El valor es la previsión para el punto de referencia del municipio; las
+        flechas indican hacia dónde sopla el viento.</span
+      >
+    </div>
+  </section>
+</Base>

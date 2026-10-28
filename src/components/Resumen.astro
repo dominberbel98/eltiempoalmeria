@@ -1,0 +1,102 @@
+---
+// Tarjeta principal (estado actual) + "El día en un vistazo". Se usa en la portada y en cada municipio.
+import { ArrowDown, ArrowUp, CloudRain, Droplets, MapPin, Sun, Sunrise, Sunset, Wind } from "lucide-react";
+import IconoCielo from "./IconoCielo";
+import { BotonFavorito } from "./Favoritos";
+import type { Municipio } from "../lib/datos";
+import { fmt, rumbo, type Prevision } from "../lib/tiempo";
+
+type Props = { municipio: Municipio; prevision: Prevision; titular?: boolean; enlace?: string };
+const { municipio: m, prevision: p, titular = false, enlace } = Astro.props;
+const a = p.actual;
+const hoy = p.dias[0];
+const Titulo = titular ? "h1" : "h2";
+---
+
+<section class="overview" aria-label={`Tiempo ahora en ${m.nombre}`}>
+  <div class:list={["hero-card", { "is-night": a?.noche }]}>
+    <div class="hero-landscape" aria-hidden="true">
+      <div class="land-sun"></div>
+      <svg viewBox="0 0 900 460" preserveAspectRatio="none">
+        <path d="M0 370 L160 282 225 312 340 211 415 220 550 100 610 152 670 122 820 255 900 240 900 460 0 460" fill="#73948e" opacity=".45"></path>
+        <path d="M0 410L210 345 350 380 485 287 570 330 650 222 730 248 900 360 900 460 0 460" fill="#3d706c" opacity=".65"></path>
+        <path d="M0 445Q210 347 410 420T900 383V460H0" fill="#164e55"></path>
+        <path d="M0 456Q260 419 460 453T900 422V460H0" fill="#123d48"></path>
+      </svg>
+    </div>
+    <div class="hero-top">
+      <span class="location-label"><MapPin size={14} aria-hidden="true" />Almería · {m.altitud} m de altitud</span>
+      <BotonFavorito client:idle slug={m.slug} nombre={m.nombre} />
+    </div>
+    <Titulo>
+      {titular ? <>El tiempo en {m.nombre}<small>Previsión por horas y próximos 7 días</small></> : m.nombre}
+    </Titulo>
+    {!titular && <p class="hero-tagline">Capital de la provincia</p>}
+    <div class="main-weather">
+      <span class="temperature">{fmt(a?.temp)}<sup>°</sup></span>
+      <div>
+        {a && <IconoCielo cielo={a.cielo} noche={a.noche} size={48} />}
+        <p>{a ? a.cieloTxt : "Previsión no disponible"}</p>
+        {
+          a && (
+            <small>
+              Sensación de {fmt(a.sens, "°")} <span aria-hidden="true">·</span>
+              <ArrowUp size={12} aria-hidden="true" /><span class="sr-only">Máxima</span>{fmt(hoy?.max, "°")}
+              <ArrowDown size={12} aria-hidden="true" /><span class="sr-only">Mínima</span>{fmt(hoy?.min, "°")}
+            </small>
+          )
+        }
+      </div>
+    </div>
+    <div class="hero-bottom">
+      <span>
+        <span class:list={["live-dot", { fallback: !p.aemet }]}></span>
+        {p.aemet ? "Previsión AEMET + modelo Open-Meteo" : "Previsión del modelo Open-Meteo"}
+        {a && ` · ${a.t.slice(11, 16)} h`}
+      </span>
+      {enlace && <a class="text-link" style="margin:0;color:inherit" href={enlace}>Previsión completa →</a>}
+    </div>
+  </div>
+
+  <div class="conditions">
+    <div class="conditions-title"><h2>El día en un vistazo</h2><span class="tiny-label">HORA PENINSULAR</span></div>
+    <div class="condition-grid">
+      <article>
+        <Wind size={21} aria-hidden="true" />
+        <h3>Viento</h3>
+        <strong>{fmt(a?.viento)}<small> km/h</small></strong>
+        <p>
+          {
+            a?.dir != null && (
+              <ArrowDown size={12} className="wind-arrow" style={{ transform: `rotate(${a.dir}deg)` }} aria-hidden="true" />
+            )
+          }
+          {rumbo(a?.dir ?? null)} · rachas de {fmt(a?.racha)} km/h
+        </p>
+      </article>
+      <article>
+        <Droplets size={21} aria-hidden="true" />
+        <h3>Humedad</h3>
+        <strong>{fmt(a?.hum)}<small> %</small></strong>
+        <p>Humedad relativa</p>
+      </article>
+      <article>
+        <Sun size={21} aria-hidden="true" />
+        <h3>Índice UV</h3>
+        <strong>{fmt(hoy?.uv)}<small> / 11+</small></strong>
+        <p>Máximo previsto del día</p>
+      </article>
+      <article>
+        <CloudRain size={21} aria-hidden="true" />
+        <h3>Lluvia</h3>
+        <strong>{fmt(hoy?.prob)}<small> %</small></strong>
+        <p>Probabilidad máxima de hoy</p>
+      </article>
+    </div>
+    <div class="sun-times">
+      <span><Sunrise size={18} aria-hidden="true" /> Amanecer <b>{hoy?.orto ?? "—"}</b></span>
+      <span class="sun-line"></span>
+      <span><Sunset size={18} aria-hidden="true" /> Atardecer <b>{hoy?.ocaso ?? "—"}</b></span>
+    </div>
+  </div>
+</section>

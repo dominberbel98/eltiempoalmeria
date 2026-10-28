@@ -1,0 +1,179 @@
+---
+import { ArrowDown, Droplets, Info } from "lucide-react";
+import Base from "../layouts/Base.astro";
+import Resumen from "../components/Resumen.astro";
+import Fuentes from "../components/Fuentes.astro";
+import ListaMunicipios from "../components/ListaMunicipios.astro";
+import IconoCielo from "../components/IconoCielo";
+import PrevisionHoraria from "../components/PrevisionHoraria";
+import MapaProvincia from "../components/MapaProvincia";
+import { cercanos, fichas, type Ficha } from "../lib/resumen";
+import { fechaCorta, fechaLarga, fmt, fmtMm, nombreDia, rumbo } from "../lib/tiempo";
+
+export function getStaticPaths() {
+  return fichas().map((ficha) => ({ params: { municipio: ficha.municipio.slug }, props: { ficha } }));
+}
+
+const { ficha } = Astro.props as { ficha: Ficha };
+const { municipio: m, prevision: p } = ficha;
+const base = import.meta.env.BASE_URL;
+const hoy = p.dias[0];
+
+// Agrupa las 48 h por día para la tabla
+const porDia = new Map<string, typeof p.horas>();
+for (const h of p.horas) porDia.set(h.t.slice(0, 10), [...(porDia.get(h.t.slice(0, 10)) ?? []), h]);
+
+const descripcion = `Previsión del tiempo en ${m.nombre} (Almería) hora a hora: temperatura, lluvia, viento y rachas, humedad, UV y nubosidad para 48 horas y los próximos 7 días.${
+  hoy ? ` Hoy, máxima de ${fmt(hoy.max, "°")} y mínima de ${fmt(hoy.min, "°")}.` : ""
+}`;
+const jsonLd = {
+  "@context": "https://schema.org",
+  "@type": "WebPage",
+  name: `El tiempo en ${m.nombre} (Almería) por horas`,
+  description: descripcion,
+  inLanguage: "es-ES",
+  dateModified: new Date().toISOString(),
+  about: {
+    "@type": "Place",
+    name: m.nombre,
+    address: { "@type": "PostalAddress", addressLocality: m.nombre, addressRegion: "Almería", addressCountry: "ES" },
+    geo: { "@type": "GeoCoordinates", latitude: m.lat, longitude: m.lon, elevation: m.altitud },
+  },
+  breadcrumb: {
+    "@type": "BreadcrumbList",
+    itemListElement: [
+      { "@type": "ListItem", position: 1, name: "Provincia de Almería", item: new URL(base, Astro.site).href },
+      { "@type": "ListItem", position: 2, name: m.nombre, item: new URL(`${base}${m.slug}/`, Astro.site).href },
+    ],
+  },
+};
+---
+
+<Base title={`El tiempo en ${m.nombre} (Almería) por horas`} description={descripcion} jsonLd={jsonLd} activo="municipio">
+  <nav class="breadcrumb" aria-label="Migas de pan">
+    <a href={base}>Provincia de Almería</a><span aria-hidden="true">›</span><span aria-current="page">{m.nombre}</span>
+  </nav>
+
+  <div style="padding-top:18px"></div>
+  {
+    !p.aemet && (
+      <div class="notice" role="note">
+        <Info size={18} aria-hidden="true" />
+        <span>
+          No hay predicción de AEMET disponible para {m.nombre} en esta actualización. Se muestran los datos del modelo Open-Meteo.
+        </span>
+      </div>
+    )
+  }
+
+  <Resumen municipio={m} prevision={p} titular />
+
+  <section class="hourly card" aria-label="Previsión hora a hora">
+    <PrevisionHoraria client:visible horas={p.horas} nombre={m.nombre} />
+  </section>
+
+  <details class="detail">
+    <summary>Detalle de las próximas 48 horas</summary>
+    <div class="table-scroll">
+      <table class="hours-table">
+        <caption class="sr-only">Previsión horaria en {m.nombre} para las próximas 48 horas</caption>
+        <thead>
+          <tr>
+            <th scope="col">Hora</th>
+            <th scope="col" style="text-align:left">Cielo</th>
+            <th scope="col">Temp.</th>
+            <th scope="col">Sensación</th>
+            <th scope="col"><abbr title="Probabilidad de precipitación">Prob.</abbr></th>
+            <th scope="col">Lluvia (mm)</th>
+            <th scope="col">Viento (km/h)</th>
+            <th scope="col">Rachas</th>
+            <th scope="col">Humedad</th>
+            <th scope="col">UV</th>
+            <th scope="col">Nubes</th>
+          </tr>
+        </thead>
+        {
+          [...porDia].map(([fecha, horas]) => (
+            <tbody>
+              <tr class="day-row">
+                <th colspan="11" scope="colgroup">
+                  {fechaLarga(fecha)}
+                </th>
+              </tr>
+              {horas.map((h) => (
+                <tr>
+                  <th scope="row" style="font-weight:600">{h.t.slice(11, 16)}</th>
+                  <td class="sky">
+                    <span>
+                      <IconoCielo cielo={h.cielo} noche={h.noche} size={20} />
+                      {h.cieloTxt}
+                    </span>
+                  </td>
+                  <td><strong>{fmt(h.temp, "°")}</strong></td>
+                  <td>{fmt(h.sens, "°")}</td>
+                  <td>{fmt(h.prob, " %")}</td>
+                  <td>{fmtMm(h.precip)}</td>
+                  <td>
+                    {h.dir != null && <ArrowDown size={12} className="wind-arrow" style={{ transform: `rotate(${h.dir}deg)` }} aria-hidden="true" />}{" "}
+                    {rumbo(h.dir)} {fmt(h.viento)}
+                  </td>
+                  <td>{fmt(h.racha)}</td>
+                  <td>{fmt(h.hum, " %")}</td>
+                  <td>{fmt(h.uv)}</td>
+                  <td>{fmt(h.nubes, " %")}</td>
+                </tr>
+              ))}
+            </tbody>
+          ))
+        }
+      </table>
+    </div>
+  </details>
+
+  <section class="week" aria-labelledby="titulo-semana">
+    <div class="section-top">
+      <div>
+        <div class="eyebrow">UN POCO MÁS ALLÁ</div>
+        <h2 id="titulo-semana">Los próximos 7 días en {m.nombre}</h2>
+      </div>
+      <span class="muted desktop-only">Máxima, mínima y probabilidad de lluvia <ArrowDown size={14} aria-hidden="true" /></span>
+    </div>
+    <ol class="week-grid">
+      {
+        p.dias.map((d, i) => (
+          <li class="day-card">
+            <h3>{nombreDia(d.fecha, i)}</h3>
+            <small>{fechaCorta(d.fecha)}</small>
+            <IconoCielo cielo={d.cielo} size={32} />
+            <span class="sky-txt">{d.cieloTxt}</span>
+            <div>
+              <strong><span class="sr-only">Máxima </span>{fmt(d.max, "°")}</strong>
+              <span><span class="sr-only">Mínima </span>{fmt(d.min, "°")}</span>
+            </div>
+            <small class="rain">
+              <Droplets size={12} aria-hidden="true" />
+              <span class="sr-only">Probabilidad de lluvia </span>
+              {fmt(d.prob, "%")}
+            </small>
+          </li>
+        ))
+      }
+    </ol>
+  </section>
+
+  <section id="provincia" class="province-section" aria-labelledby="titulo-cerca">
+    <div class="section-top">
+      <div>
+        <div class="eyebrow">CADA RINCÓN, SU CIELO</div>
+        <h2 id="titulo-cerca">Alrededor de {m.nombre}</h2>
+        <p class="muted">Lluvia, viento y temperatura hora a hora en cada municipio, y los más cercanos a {m.nombre}.</p>
+      </div>
+    </div>
+    <div class="province-content">
+      <MapaProvincia client:visible base={base} seleccionado={m.slug} />
+      <ListaMunicipios fichas={cercanos(m)} titulo="Municipios cercanos" />
+    </div>
+  </section>
+
+  <Fuentes id={m.id} nombre={m.nombre} aemet={p.aemet} elaborado={p.elaborado} />
+</Base>

@@ -1,0 +1,68 @@
+---
+import "../styles/global.css";
+import { MapPin, Sun } from "lucide-react";
+import { getMeta } from "../lib/datos";
+import { fechaHoraActualizacion } from "../lib/tiempo";
+
+type Props = {
+  title: string;
+  description: string;
+  jsonLd?: Record<string, unknown>;
+  activo?: "inicio" | "municipio" | "mapa";
+};
+const { title, description, jsonLd, activo } = Astro.props;
+const base = import.meta.env.BASE_URL;
+const meta = getMeta();
+const canonical = new URL(Astro.url.pathname, Astro.site).href;
+---
+
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={canonical} />
+    <link rel="icon" type="image/svg+xml" href={`${base}favicon.svg`} />
+    <link rel="sitemap" href={`${base}sitemap-index.xml`} />
+    <meta name="theme-color" content="#f6f5ef" />
+    <meta property="og:type" content="website" />
+    <meta property="og:locale" content="es_ES" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonical} />
+    {jsonLd && <script type="application/ld+json" set:html={JSON.stringify(jsonLd)} />}
+  </head>
+  <body>
+    <a class="skip" href="#contenido">Saltar al contenido</a>
+    <header class="header">
+      <a href={base} class="brand">
+        <span class="brand-symbol" aria-hidden="true"><Sun size={23} /><span></span></span>
+        <span>almería<span class="brand-dot">.</span><small>CIELO</small></span>
+      </a>
+      <nav aria-label="Principal">
+        <a href={base} aria-current={activo === "inicio" ? "page" : undefined}>Previsión</a>
+        <a href={`${base}mapa/`} aria-current={activo === "mapa" ? "page" : undefined}>Mapa por horas</a>
+        <a href={`${base}#fuentes`}>Sobre los datos</a>
+      </nav>
+      <span class="province-badge"><MapPin size={13} aria-hidden="true" /> Hecho para Almería</span>
+    </header>
+
+    <main id="contenido">
+      <slot />
+    </main>
+
+    <footer>
+      <a class="footer-logo" href={base}>almería<span>.</span> <small>CIELO</small></a>
+      <p class="credits">
+        Actualizado el <time datetime={meta.updatedAt}>{fechaHoraActualizacion(meta.updatedAt)}</time> (hora peninsular).<br />
+        Información elaborada por la <a href="https://www.aemet.es/" rel="noopener">Agencia Estatal de Meteorología</a>.
+        Weather data by <a href="https://open-meteo.com/" rel="noopener">Open-Meteo.com</a>{" "}
+        (<a href="https://creativecommons.org/licenses/by/4.0/" rel="noopener license">CC BY 4.0</a>).
+        Límites provinciales: IGN · Ministerio de Transportes.
+      </p>
+      <span>°C · km/h · mm · Europe/Madrid</span>
+    </footer>
+  </body>
+</html>

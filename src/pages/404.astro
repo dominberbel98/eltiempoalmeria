@@ -1,0 +1,14 @@
+---
+import Base from "../layouts/Base.astro";
+const base = import.meta.env.BASE_URL;
+---
+
+<Base title="Página no encontrada · El tiempo en Almería" description="La página que buscas no existe.">
+  <section class="intro">
+    <div>
+      <div class="eyebrow">ERROR 404</div>
+      <h1>Aquí no hay <em>cielo.</em></h1>
+      <p>La página que buscas no existe. <a href={base} style="text-decoration:underline">Vuelve a la portada</a> y busca tu municipio.</p>
+    </div>
+  </section>
+</Base>

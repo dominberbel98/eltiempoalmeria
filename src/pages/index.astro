@@ -1,0 +1,102 @@
+---
+import { MapPin } from "lucide-react";
+import Base from "../layouts/Base.astro";
+import Resumen from "../components/Resumen.astro";
+import Fuentes from "../components/Fuentes.astro";
+import ListaMunicipios from "../components/ListaMunicipios.astro";
+import Buscador from "../components/Buscador";
+import MapaProvincia from "../components/MapaProvincia";
+import { RinconesRapidos } from "../components/Favoritos";
+import { fichas } from "../lib/resumen";
+import { fmt } from "../lib/tiempo";
+
+const base = import.meta.env.BASE_URL;
+const todas = fichas();
+const capital = todas.find((f) => f.municipio.id === "04013") ?? todas[0];
+const lista = todas.map(({ municipio: m }) => ({ nombre: m.nombre, slug: m.slug, lat: m.lat, lon: m.lon, altitud: m.altitud }));
+
+// Extremos de hoy en la provincia
+const conDatos = todas.filter((f) => f.prevision.dias[0]?.max != null && f.prevision.dias[0]?.min != null);
+const masCalor = [...conDatos].sort((a, b) => b.prevision.dias[0].max! - a.prevision.dias[0].max!)[0];
+const masFrio = [...conDatos].sort((a, b) => a.prevision.dias[0].min! - b.prevision.dias[0].min!)[0];
+const masLluvia = [...conDatos].sort((a, b) => (b.prevision.dias[0].prob ?? 0) - (a.prevision.dias[0].prob ?? 0))[0];
+
+const jsonLd = {
+  "@context": "https://schema.org",
+  "@type": "WebSite",
+  name: "El tiempo en Almería",
+  url: new URL(base, Astro.site).href,
+  inLanguage: "es-ES",
+  description: "Previsión meteorológica por horas para los 103 municipios de la provincia de Almería.",
+};
+---
+
+<Base
+  title="El tiempo en Almería por horas: previsión para los 103 municipios"
+  description="Previsión del tiempo en la provincia de Almería: mapa de temperaturas y previsión por horas y a 7 días para sus 103 municipios, con datos de AEMET y Open-Meteo."
+  jsonLd={jsonLd}
+  activo="inicio"
+>
+  <section class="intro">
+    <div>
+      <div class="eyebrow">DEL MEDITERRÁNEO A LA SIERRA</div>
+      <h1>El tiempo, <em>de allí.</em></h1>
+      <p>Una provincia, 103 municipios. Mil formas de mirar al cielo.</p>
+    </div>
+    <Buscador client:idle municipios={lista} base={base} />
+  </section>
+
+  <RinconesRapidos
+    client:idle
+    base={base}
+    municipios={lista.map(({ nombre, slug }) => ({ nombre, slug }))}
+    porDefecto={["almeria", "roquetas-de-mar", "el-ejido", "nijar", "mojacar", "velez-blanco"]}
+  />
+
+  <Resumen municipio={capital.municipio} prevision={capital.prevision} enlace={`${base}${capital.municipio.slug}/`} />
+
+  {
+    masCalor && masFrio && masLluvia && (
+      <section class="hourly card" aria-labelledby="titulo-extremos" style="min-height:0">
+        <div class="eyebrow">HOY EN LA PROVINCIA</div>
+        <h2 id="titulo-extremos" class="sr-only">Extremos de hoy</h2>
+        <div class="condition-grid" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">
+          <article style="padding-left:0">
+            <h3>Máxima más alta</h3>
+            <strong>{fmt(masCalor.prevision.dias[0].max, "°")}</strong>
+            <p><a href={`${base}${masCalor.municipio.slug}/`} style="text-decoration:underline">{masCalor.municipio.nombre}</a></p>
+          </article>
+          <article style="padding-left:0">
+            <h3>Mínima más baja</h3>
+            <strong>{fmt(masFrio.prevision.dias[0].min, "°")}</strong>
+            <p><a href={`${base}${masFrio.municipio.slug}/`} style="text-decoration:underline">{masFrio.municipio.nombre}</a></p>
+          </article>
+          <article style="padding-left:0">
+            <h3>Más probabilidad de lluvia</h3>
+            <strong>{fmt(masLluvia.prevision.dias[0].prob, "%")}</strong>
+            <p><a href={`${base}${masLluvia.municipio.slug}/`} style="text-decoration:underline">{masLluvia.municipio.nombre}</a></p>
+          </article>
+        </div>
+      </section>
+    )
+  }
+
+  <section id="provincia" class="province-section" aria-labelledby="titulo-provincia" style="margin-top:40px">
+    <div class="section-top">
+      <div>
+        <div class="eyebrow">CADA RINCÓN, SU CIELO</div>
+        <h2 id="titulo-provincia">Explora la provincia</h2>
+        <p class="muted">Lluvia, viento, rachas y temperatura de las próximas 48 horas en cada uno de los 103 municipios. Pasa por encima de un municipio para ver sus datos o pulsa ▶ para ver la evolución.</p>
+      </div>
+    </div>
+    <div class="province-content">
+      <MapaProvincia client:visible base={base} />
+      <ListaMunicipios fichas={todas} titulo="Toda Almería" />
+    </div>
+    <div class="map-foot">
+      <MapPin size={13} aria-hidden="true" /><span>Cada área es un término municipal (límites IGN). El valor es la previsión para el punto de referencia del municipio; las flechas indican hacia dónde sopla el viento.</span>
+    </div>
+  </section>
+
+  <Fuentes />
+</Base>
