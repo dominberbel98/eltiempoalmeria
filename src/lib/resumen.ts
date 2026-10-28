@@ -7,7 +7,8 @@ export type Ficha = { municipio: Municipio; prevision: Prevision };
 let cache: Ficha[] | null = null;
 
 export function fichas(): Ficha[] {
-  if (cache) return cache;
+  // En `npm run dev` no se cachea: así se ven al momento los datos nuevos de `npm run fetch:data`
+  if (cache && !import.meta.env.DEV) return cache;
   const ahora = horaLocal();
   cache = getMunicipios().map((municipio) => ({
     municipio,
