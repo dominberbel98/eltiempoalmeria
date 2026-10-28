@@ -24,6 +24,26 @@ const BBOX = { latMin: 36.65, latMax: 37.95, lonMin: -3.2, lonMax: -1.6 };
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+// Decodifica cada secuencia UTF-8 válida como UTF-8 y cada byte suelto no válido como Latin-1
+function decodificarMixto(bytes: Uint8Array): string {
+  let out = "";
+  for (let i = 0; i < bytes.length; ) {
+    const b = bytes[i];
+    const largo = b >= 0xf0 && b <= 0xf4 ? 4 : b >= 0xe0 ? 3 : b >= 0xc2 && b <= 0xdf ? 2 : 1;
+    if (b >= 0x80 && largo > 1 && i + largo <= bytes.length) {
+      const seq = bytes.subarray(i, i + largo);
+      if (seq.subarray(1).every((c) => c >= 0x80 && c <= 0xbf)) {
+        out += new TextDecoder("utf-8").decode(seq);
+        i += largo;
+        continue;
+      }
+    }
+    out += String.fromCharCode(b);
+    i += 1;
+  }
+  return out;
+}
+
 async function getText(url: string, headers: Record<string, string> = {}): Promise<string> {
   for (let intento = 1; intento <= 5; intento++) {
     let res: Response;
@@ -41,12 +61,12 @@ async function getText(url: string, headers: Record<string, string> = {}): Promi
     if (!res.ok) throw new Error(`${res.status} ${url}`);
     const charset =
       /charset=([^;]+)/i.exec(res.headers.get("content-type") ?? "")?.[1]?.trim().toLowerCase() ?? "utf-8";
-    const bytes = await res.arrayBuffer();
-    // AEMET declara ISO-8859-15 pero a menudo envía UTF-8: se prueba UTF-8 estricto y, si no lo es, el charset declarado
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    // AEMET declara ISO-8859-15 pero envía UTF-8, Latin-1 o ambos mezclados en el mismo archivo
     try {
       return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
     } catch {
-      return new TextDecoder(charset).decode(bytes);
+      return charset.startsWith("utf") ? new TextDecoder("utf-8").decode(bytes) : decodificarMixto(bytes);
     }
   }
   throw new Error(`Demasiados reintentos: ${url}`);
