@@ -7,3 +7,9 @@ src/data/
 
 # Prototipo de referencia
 *.zip
+
+# Herramientas locales
+.claude/
+
+# Imágenes de radar descargadas en cada ejecución
+public/radar/
