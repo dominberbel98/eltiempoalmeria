@@ -1,19 +1,46 @@
 ---
+// Layout común: cabecera con navegación (y buscador opcional), aviso de datos desfasados, contenido y pie con atribuciones.
+import "@fontsource-variable/archivo/wdth.css";
 import "../styles/global.css";
-import { MapPin, Sun } from "lucide-react";
+import archivoLatin from "@fontsource-variable/archivo/files/archivo-latin-wdth-normal.woff2?url";
 import { getMeta } from "../lib/datos";
-import { fechaHoraActualizacion } from "../lib/tiempo";
+import { horasDesde, textoActualizacion } from "../lib/tiempo";
 
+type Seccion = "prevision" | "mapa" | "radar" | "agro";
 type Props = {
   title: string;
   description: string;
-  jsonLd?: Record<string, unknown>;
-  activo?: "inicio" | "municipio" | "mapa";
+  // Datos estructurados (schema.org) de la página
+  jsonLd?: Record<string, unknown> | Record<string, unknown>[];
+  // Sección de la navegación que se marca como actual
+  activo?: Seccion;
+  // "contenedor" (por defecto): <main> centrado a 1280 px en columna con huecos de 48/32 px.
+  // "completo": <main> sin márgenes, para páginas con bandas a todo el ancho (.banda-oscura + .contenedor).
+  ancho?: "contenedor" | "completo";
+  // Añade al pie la atribución de la Red de Información Agroclimática (RIA) de Andalucía
+  ria?: boolean;
 };
-const { title, description, jsonLd, activo } = Astro.props;
+
+const { title, description, jsonLd, activo, ancho = "contenedor", ria = false } = Astro.props;
 const base = import.meta.env.BASE_URL;
 const meta = getMeta();
 const canonical = new URL(Astro.url.pathname, Astro.site).href;
+const conBuscador = Astro.slots.has("buscador");
+
+const secciones: { id: Seccion; texto: string; href: string }[] = [
+  { id: "prevision", texto: "Previsión", href: base },
+  { id: "mapa", texto: "Mapa", href: `${base}mapa/` },
+  { id: "radar", texto: "Radar", href: `${base}radar/` },
+  { id: "agro", texto: "Agro", href: `${base}agro/` },
+];
+// "page" si el enlace es esta misma página; "true" si es la sección a la que pertenece (p. ej. un municipio en Previsión)
+const actual = (s: (typeof secciones)[number]) => (s.id !== activo ? undefined : Astro.url.pathname === s.href ? "page" : "true");
+
+// Aviso si el dato más reciente tiene más de 2 h. Se calcula en el build y se repite en el navegador,
+// por si la página publicada se queda sin regenerar.
+const desfasado = horasDesde(meta.updatedAt) > 2;
+const actualizado = meta.updatedAt ? textoActualizacion(meta.updatedAt) : null;
+const jsonLdTexto = jsonLd ? JSON.stringify(jsonLd).replace(/</g, "\\u003c") : null;
 ---
 
 <!doctype html>
@@ -24,45 +51,135 @@ const canonical = new URL(Astro.url.pathname, Astro.site).href;
     <title>{title}</title>
     <meta name="description" content={description} />
     <link rel="canonical" href={canonical} />
+    <link rel="preload" href={archivoLatin} as="font" type="font/woff2" crossorigin />
     <link rel="icon" type="image/svg+xml" href={`${base}favicon.svg`} />
     <link rel="sitemap" href={`${base}sitemap-index.xml`} />
-    <meta name="theme-color" content="#f6f5ef" />
+    <meta name="theme-color" content="#eef1f0" />
     <meta property="og:type" content="website" />
     <meta property="og:locale" content="es_ES" />
+    <meta property="og:site_name" content="El tiempo en Almería" />
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
     <meta property="og:url" content={canonical} />
-    {jsonLd && <script type="application/ld+json" set:html={JSON.stringify(jsonLd)} />}
+    <meta name="twitter:card" content="summary" />
+    {jsonLdTexto && <script type="application/ld+json" set:html={jsonLdTexto} />}
+    <script is:inline>document.documentElement.classList.add("js");</script>
   </head>
   <body>
-    <a class="skip" href="#contenido">Saltar al contenido</a>
-    <header class="header">
-      <a href={base} class="brand">
-        <span class="brand-symbol" aria-hidden="true"><Sun size={23} /><span></span></span>
-        <span>almería<span class="brand-dot">.</span><small>CIELO</small></span>
-      </a>
-      <nav aria-label="Principal">
-        <a href={base} aria-current={activo === "inicio" ? "page" : undefined}>Previsión</a>
-        <a href={`${base}mapa/`} aria-current={activo === "mapa" ? "page" : undefined}>Mapa por horas</a>
-        <a href={`${base}#fuentes`}>Sobre los datos</a>
+    <a class="saltar" href="#contenido">Saltar al contenido</a>
+
+    <header class="cabecera contenedor">
+      <a class="logo" href={base}>El tiempo en Almería</a>
+      <div class="cabecera-botones">
+        {
+          conBuscador && (
+            <button
+              type="button"
+              class="boton-icono"
+              aria-label="Buscar municipio"
+              aria-expanded="false"
+              aria-controls="cabecera-buscador"
+              data-despliega="buscador"
+            >
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+                <circle cx="11" cy="11" r="7" />
+                <path d="m20 20-3.5-3.5" />
+              </svg>
+            </button>
+          )
+        }
+        <button type="button" class="boton-icono" aria-label="Menú" aria-expanded="false" aria-controls="menu-principal" data-despliega="menu">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+            <path d="M4 7h16M4 12h16M4 17h16" />
+          </svg>
+        </button>
+      </div>
+      <nav id="menu-principal" class="nav-principal" aria-label="Principal">
+        {secciones.map((s) => <a href={s.href} aria-current={actual(s)}>{s.texto}</a>)}
       </nav>
-      <span class="province-badge"><MapPin size={13} aria-hidden="true" /> Hecho para Almería</span>
+      {
+        conBuscador && (
+          <div id="cabecera-buscador" class="cabecera-buscador">
+            <slot name="buscador" />
+          </div>
+        )
+      }
     </header>
 
-    <main id="contenido">
+    <section class="aviso-desfase" aria-label="Aviso sobre los datos" data-actualizado={meta.updatedAt} hidden={!desfasado}>
+      <p class="contenedor">
+        <strong>Los datos pueden no estar al día:</strong>{" "}
+        {actualizado ? `última actualización el ${actualizado}.` : "no consta la hora de la última actualización."}
+      </p>
+    </section>
+    <script is:inline>
+      (function () {
+        var aviso = document.querySelector(".aviso-desfase");
+        var t = aviso ? Date.parse(aviso.getAttribute("data-actualizado") || "") : NaN;
+        if (aviso && !(Date.now() - t <= 7200000)) aviso.hidden = false;
+      })();
+    </script>
+
+    <main id="contenido" class={ancho === "contenedor" ? "pagina" : undefined}>
       <slot />
     </main>
 
-    <footer>
-      <a class="footer-logo" href={base}>almería<span>.</span> <small>CIELO</small></a>
-      <p class="credits">
-        Actualizado el <time datetime={meta.updatedAt}>{fechaHoraActualizacion(meta.updatedAt)}</time> (hora peninsular).<br />
-        Información elaborada por la <a href="https://www.aemet.es/" rel="noopener">Agencia Estatal de Meteorología</a>.
-        Weather data by <a href="https://open-meteo.com/" rel="noopener">Open-Meteo.com</a>{" "}
-        (<a href="https://creativecommons.org/licenses/by/4.0/" rel="noopener license">CC BY 4.0</a>).
-        Límites provinciales: IGN · Ministerio de Transportes.
-      </p>
-      <span>°C · km/h · mm · Europe/Madrid</span>
+    <footer class="pie contenedor">
+      <div class="pie-creditos">
+        <p>
+          Información elaborada por la <a href="https://www.aemet.es/">Agencia Estatal de Meteorología</a>. Weather data by{" "}
+          <a href="https://open-meteo.com/">Open-Meteo.com</a> (<a href="https://creativecommons.org/licenses/by/4.0/" rel="license">CC BY 4.0</a>).
+          Límites municipales y núcleos de población: obra derivada de datos del <a href="https://www.ign.es/">IGN</a> (CC BY 4.0). Población:{" "}
+          <a href="https://www.ine.es/">INE</a>, Nomenclátor.
+        </p>
+        {
+          ria && (
+            <p>
+              Datos agroclimáticos: Red de Información Agroclimática de Andalucía (RIA), IFAPA, Junta de Andalucía. Información obtenida del{" "}
+              <a href="https://www.juntadeandalucia.es/agriculturaypesca/ifapa/riaweb/web/">Portal IFAPA</a>.
+            </p>
+          )
+        }
+      </div>
+      <div class="pie-estado">
+        <p>
+          {
+            actualizado ? (
+              <>
+                Actualizado el <time datetime={meta.updatedAt}>{actualizado}</time>
+              </>
+            ) : (
+              "Sin hora de actualización"
+            )
+          }
+        </p>
+        <slot name="pie" />
+      </div>
     </footer>
+
+    <script>
+      // Menú y buscador plegables en móvil (con JS; sin JS se muestran siempre)
+      const botones = Array.from(document.querySelectorAll<HTMLButtonElement>("[data-despliega]"));
+      const panel = (b: HTMLButtonElement) => document.getElementById(b.getAttribute("aria-controls") ?? "");
+      const poner = (b: HTMLButtonElement, abierto: boolean) => {
+        b.setAttribute("aria-expanded", String(abierto));
+        panel(b)?.classList.toggle("abierto", abierto);
+      };
+      for (const boton of botones) {
+        boton.addEventListener("click", () => {
+          const abrir = boton.getAttribute("aria-expanded") !== "true";
+          for (const otro of botones) if (otro !== boton) poner(otro, false);
+          poner(boton, abrir);
+          if (abrir && boton.dataset.despliega === "buscador") panel(boton)?.querySelector<HTMLInputElement>("input")?.focus();
+        });
+      }
+      document.addEventListener("keydown", (e) => {
+        if (e.key !== "Escape") return;
+        const abierto = botones.find((b) => b.getAttribute("aria-expanded") === "true");
+        if (!abierto) return;
+        poner(abierto, false);
+        abierto.focus();
+      });
+    </script>
   </body>
 </html>
