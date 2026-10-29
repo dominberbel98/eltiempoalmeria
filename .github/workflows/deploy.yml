@@ -6,7 +6,9 @@ on:
     branches: [main]
   workflow_dispatch:
   schedule:
-    - cron: "17 * * * *" # cada hora en el minuto 17 (UTC)
+    # Cada 15 min, evitando el minuto 0. Cada fuente tiene su propio TTL en scripts/fetch-weather.ts:
+    # la mayoría de ejecuciones solo consultan el ATOM de AEMET y el radar.
+    - cron: "7,22,37,52 * * * *"
 
 permissions:
   contents: read
@@ -22,23 +24,40 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
 
       - run: npm ci
 
+      # src/data/ está en .gitignore: se conserva entre ejecuciones con la caché de Actions
+      # (la entrada más reciente con prefijo "datos-"; si se expulsó, se empieza de cero)
+      - name: Restaurar datos anteriores
+        uses: actions/cache/restore@v6
+        with:
+          path: src/data
+          key: datos-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: datos-
+
       - name: Descargar datos meteorológicos
+        id: fetch
         run: npm run fetch:data
         env:
           AEMET_API_KEY: ${{ secrets.AEMET_API_KEY }}
 
+      - name: Guardar datos
+        if: ${{ !cancelled() && steps.fetch.outcome == 'success' }}
+        uses: actions/cache/save@v6
+        with:
+          path: src/data
+          key: datos-${{ github.run_id }}-${{ github.run_attempt }}
+
       - run: npm run build
 
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: dist
 
@@ -50,4 +69,4 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
