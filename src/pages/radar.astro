@@ -1,0 +1,167 @@
+---
+// /radar/: últimas imágenes del radar regional de AEMET en Almería (Níjar), con animación.
+import Base from "../layouts/Base.astro";
+import RadarAnimacion, { type FotogramaRadar } from "../components/RadarAnimacion";
+import { ALTO_RADAR, ANCHO_RADAR, ATRIBUCION_RADAR, MINUTOS_AVISO, URL_NOTA_LEGAL_AEMET, datosRadar } from "../lib/radar";
+
+const base = import.meta.env.BASE_URL;
+const radar = datosRadar();
+const { imagenes, ultima } = radar;
+
+const fotogramas: FotogramaRadar[] = imagenes.map((im) => ({
+  src: im.src,
+  alt: im.alt,
+  etiquetaHora: im.etiquetaHora,
+  fechaMadrid: im.fechaMadrid,
+  textoCompleto: im.textoCompleto,
+  relativa: im.relativa,
+}));
+
+// "45 min", "1 h 30 min", "2 h"
+const duracion = (min: number) => {
+  const h = Math.floor(min / 60);
+  const m = Math.round(min % 60);
+  return h ? (m ? `${h} h ${m} min` : `${h} h`) : `${m} min`;
+};
+const hace = (min: number) => `hace ${duracion(min)}`;
+
+const primera = imagenes[0];
+const tramo = primera?.minutosAntes ?? 0;
+const textoAnimacion = !imagenes.length
+  ? "sin imágenes"
+  : imagenes.length === 1
+    ? "solo la última imagen"
+    : tramo <= 150
+      ? `${imagenes.length} imágenes, últimas ${duracion(tramo)}`
+      : `${imagenes.length} imágenes desde el ${primera.fechaMadrid}`;
+
+const deLas = ultima?.aprox ? "de hacia las" : "de las";
+
+const jsonLd = {
+  "@context": "https://schema.org",
+  "@type": "WebPage",
+  name: "Radar de lluvia de Almería",
+  url: new URL(`${base}radar/`, Astro.site).href,
+  inLanguage: "es-ES",
+  description: "Últimas imágenes del radar de AEMET en Almería (Níjar): dónde llueve ahora en la provincia.",
+};
+---
+
+<Base
+  title="Radar de lluvia en Almería: dónde llueve ahora"
+  description="Imágenes del radar de AEMET en Almería (Níjar) de las últimas horas, con animación: mira dónde está lloviendo ahora en la provincia de Almería."
+  jsonLd={jsonLd}
+  activo="radar"
+  ancho="completo"
+>
+  <section class="banda-oscura" aria-labelledby="t-radar">
+    <div class="contenedor flex flex-wrap gap-10">
+      <div class="flex min-w-0 flex-[999_1_620px] flex-col gap-[18px]">
+        <h1 id="t-radar" class="titular titular-banda">Dónde llueve ahora</h1>
+
+        {
+          ultima ? (
+            <p class="aviso" data-aviso-radar data-ultima={ultima.hora ?? ""} data-limite={MINUTOS_AVISO} hidden={!radar.antigua}>
+              <span>
+                La última imagen es {deLas} {ultima.horaMadrid} del {ultima.fechaMadrid}
+                <span data-hace>{radar.minutosDesdeUltima != null ? ` (${hace(radar.minutosDesdeUltima)})` : ""}</span>: AEMET no ha
+                publicado imágenes más recientes.
+              </span>
+            </p>
+          ) : (
+            <p class="aviso">{radar.aviso}</p>
+          )
+        }
+
+        {
+          fotogramas.length ? (
+            <RadarAnimacion client:visible imagenes={fotogramas} ancho={ANCHO_RADAR} alto={ALTO_RADAR} />
+          ) : (
+            <div class="panel-oscuro texto-secundario">Cuando AEMET publique una imagen del radar aparecerá aquí.</div>
+          )
+        }
+
+        <p class="nota text-suave-oscuro">
+          {ATRIBUCION_RADAR}. <a href={URL_NOTA_LEGAL_AEMET}>Aviso legal de AEMET</a>.
+        </p>
+      </div>
+
+      <div class="flex min-w-0 flex-[1_1_300px] flex-col gap-6 md:pt-2">
+        <div class="flex flex-col gap-2.5">
+          <h2 class="titular titular-3">Cómo leerlo</h2>
+          <p class="max-w-[38ch] leading-[1.55] text-texto-oscuro">
+            Los colores muestran la intensidad de la precipitación que detecta el radar: del azul, lluvia débil, al rojo y el violeta,
+            chubascos fuertes o granizo. La escala, en dBZ, está en la parte inferior de la imagen.
+          </p>
+        </div>
+        <dl class="m-0 flex flex-col gap-3.5">
+          <div class="flex justify-between gap-4 border-b border-linea-oscura pb-2.5">
+            <dt class="text-suave-oscuro">Se actualiza</dt>
+            <dd class="m-0 text-right font-bold">cada 15 minutos</dd>
+          </div>
+          <div class="flex justify-between gap-4 border-b border-linea-oscura pb-2.5">
+            <dt class="text-suave-oscuro">Animación</dt>
+            <dd class="m-0 text-right font-bold">{textoAnimacion}</dd>
+          </div>
+          <div class="flex justify-between gap-4 border-b border-linea-oscura pb-2.5">
+            <dt class="text-suave-oscuro">Radar</dt>
+            <dd class="m-0 text-right font-bold">AEMET, regional de Almería</dd>
+          </div>
+          {
+            ultima && (
+              <div class="flex justify-between gap-4 border-b border-linea-oscura pb-2.5">
+                <dt class="text-suave-oscuro">Última imagen</dt>
+                <dd class="m-0 text-right font-bold">
+                  {ultima.etiquetaHora}, {ultima.fechaMadrid}
+                </dd>
+              </div>
+            )
+          }
+        </dl>
+        <p class="text-[15px] leading-[1.55] text-suave-oscuro">
+          El radar ve la lluvia que cae ahora. Para saber si lloverá esta tarde, mira la previsión por horas de tu municipio.
+        </p>
+        <a href={base} class="boton-claro self-start">Ver la previsión por horas</a>
+      </div>
+    </div>
+  </section>
+
+  <div class="contenedor pila py-8 md:py-10">
+    <section aria-labelledby="t-nada" class="flex flex-wrap gap-x-12 gap-y-3">
+      <h2 id="t-nada" class="flex-[0_0_200px] text-lg font-bold">Si no se ve nada</h2>
+      <p class="texto-largo m-0 flex-[1_1_420px]">
+        Una imagen sin manchas de color significa que ahora no llueve en la zona que cubre el radar. Si AEMET no publica una imagen nueva,
+        se mantiene la última y su hora aparece junto al deslizador.
+      </p>
+    </section>
+    <section aria-labelledby="t-hora" class="flex flex-wrap gap-x-12 gap-y-3">
+      <h2 id="t-hora" class="flex-[0_0_200px] text-lg font-bold">La hora de la imagen</h2>
+      <p class="texto-largo m-0 flex-[1_1_420px]">
+        AEMET rotula cada imagen en hora UTC, en la franja inferior. Aquí la ves en hora peninsular: en invierno, una hora más; en
+        verano, dos. Si no se ha podido leer la hora de una imagen, aparece como aproximada («hacia las»).
+      </p>
+    </section>
+  </div>
+
+  <p slot="pie">
+    {ATRIBUCION_RADAR}. <a href={URL_NOTA_LEGAL_AEMET}>Aviso legal</a>.
+  </p>
+</Base>
+
+<script>
+  // El aviso de imagen antigua se recalcula en el navegador, por si la página publicada lleva tiempo sin regenerarse
+  const aviso = document.querySelector<HTMLElement>("[data-aviso-radar]");
+  const t = Date.parse(aviso?.dataset.ultima ?? "");
+  const limite = Number(aviso?.dataset.limite ?? 30);
+  if (aviso && Number.isFinite(t)) {
+    const min = Math.max(0, Math.round((Date.now() - t) / 60_000));
+    if (min > limite) {
+      const h = Math.floor(min / 60);
+      const m = min % 60;
+      const texto = h ? (m ? `${h} h ${m} min` : `${h} h`) : `${m} min`;
+      const hace = aviso.querySelector<HTMLElement>("[data-hace]");
+      if (hace) hace.textContent = ` (hace ${texto})`;
+      aviso.hidden = false;
+    }
+  }
+</script>

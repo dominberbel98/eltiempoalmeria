@@ -1,14 +1,42 @@
 ---
 import Base from "../layouts/Base.astro";
+import Buscador from "../components/Buscador";
+import { getMeta } from "../lib/datos";
+
 const base = import.meta.env.BASE_URL;
+const version = getMeta().updatedAt;
+const secciones = [
+  { texto: "Previsión de la provincia", href: base },
+  { texto: "Mapa por horas", href: `${base}mapa/` },
+  { texto: "Radar de lluvia", href: `${base}radar/` },
+  { texto: "Agro: riego y heladas", href: `${base}agro/` },
+];
 ---
 
-<Base title="Página no encontrada · El tiempo en Almería" description="La página que buscas no existe.">
-  <section class="intro">
-    <div>
-      <div class="eyebrow">ERROR 404</div>
-      <h1>Aquí no hay <em>cielo.</em></h1>
-      <p>La página que buscas no existe. <a href={base} style="text-decoration:underline">Vuelve a la portada</a> y busca tu municipio.</p>
+<Base title="Página no encontrada | El tiempo en Almería" description="La página que buscas no existe. Busca tu municipio de Almería o vuelve a la portada.">
+  <section aria-labelledby="t-404" class="flex max-w-[44rem] flex-col gap-5 py-4 md:py-10">
+    <h1 id="t-404" class="titular titular-banda">Esta página no existe</h1>
+    <p class="texto-largo text-lg">
+      Error 404: puede que el enlace esté mal escrito o que la página haya cambiado de dirección. Busca tu municipio o un núcleo de población, o
+      vuelve a una de las secciones.
+    </p>
+    <div class="max-w-[28rem]">
+      <Buscador client:idle base={base} version={version} placeholder="Busca tu municipio o núcleo" />
     </div>
   </section>
+
+  <nav aria-labelledby="t-secciones" class="separado flex flex-col gap-3 pt-6">
+    <h2 id="t-secciones" class="titular titular-4">Secciones</h2>
+    <ul class="m-0 flex list-none flex-wrap gap-3 p-0">
+      {
+        secciones.map((s) => (
+          <li>
+            <a class="boton-pastilla" href={s.href}>
+              {s.texto}
+            </a>
+          </li>
+        ))
+      }
+    </ul>
+  </nav>
 </Base>
