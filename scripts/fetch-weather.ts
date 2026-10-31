@@ -1,224 +1,192 @@
 // scripts/fetch-weather.ts
-// Descarga datos de AEMET y Open-Meteo para los 103 municipios de Almería y los guarda en src/data/.
-// Uso: AEMET_API_KEY=xxx npx tsx scripts/fetch-weather.ts
-// Sin clave (solo en local, nunca en CI) descarga solo Open-Meteo para poder trabajar en la web.
-
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+// Orquestador de descarga: ejecuta en orden los módulos de scripts/fuentes/*.ts según su caducidad (TTL) y lo que
+// ya haya en src/data/ (restaurado de la caché de Actions o vacío) y escribe src/data/meta.json.
+//
+// Uso:  npm run fetch:data                       (lee AEMET_API_KEY de .env si existe)
+//       npm run fetch:data -- --forzar           (ignora los TTL de todas las fuentes)
+//       npm run fetch:data -- --solo aemet       (solo esa fuente, forzada: aemet, openmeteo, zonas, observaciones, radar, ria)
+// Sin AEMET_API_KEY (solo en local, nunca en CI) se saltan las fuentes AEMET y se conserva lo que hubiera.
+import { existsSync } from "node:fs";
+import { mkdir } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import {
+  escribirJson,
+  leerDatosMunicipio,
+  leerJson,
+  mensajeError,
+  msElaborado,
+  msIso,
+  municipiosDesdeSemilla,
+  rutaMunicipio,
+} from "./fuentes/comun";
+import type { Ctx, Fuente, Meta, ResultadoFuente } from "./fuentes/tipos";
 
-const AEMET = "https://opendata.aemet.es/opendata/api";
-const KEY = process.env.AEMET_API_KEY;
-if (!KEY && process.env.CI) throw new Error("Falta la variable de entorno AEMET_API_KEY");
-if (!KEY) console.warn("AVISO: sin AEMET_API_KEY. Modo local: solo Open-Meteo, todos los municipios marcados como fallo AEMET.");
+const DIR_RAIZ = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const DIR_DATOS = path.join(DIR_RAIZ, "src", "data");
+const DIR_FUENTES = path.join(DIR_RAIZ, "scripts", "fuentes");
+const MAX_SIN_DATOS = 0.2; // si más del 20 % de municipios se queda sin ninguna previsión, se aborta (sigue online la versión anterior)
+const ANTIGUEDAD_FALLO_AEMET_MS = 24 * 3_600_000;
 
-// Lista de respaldo (código INE, nombre, coordenadas) por si el maestro de AEMET no está disponible
-const SEMILLA = path.resolve("scripts/municipios-almeria.json");
+// Orden de ejecución. Los opcionales los crean otras tareas: si el archivo no existe, se saltan.
+const MODULOS: { nombre: string; archivo: string; clave: string; opcional?: boolean }[] = [
+  { nombre: "aemet", archivo: "aemet.ts", clave: "aemet" },
+  { nombre: "openmeteo", archivo: "openmeteo.ts", clave: "openMeteo" },
+  { nombre: "zonas", archivo: "zonas.ts", clave: "zonas", opcional: true },
+  { nombre: "observaciones", archivo: "observaciones.ts", clave: "observaciones" },
+  { nombre: "radar", archivo: "radar.ts", clave: "radar", opcional: true },
+  { nombre: "ria", archivo: "ria.ts", clave: "ria", opcional: true },
+];
 
-const OUT = path.resolve("src/data");
-const PREFIJO_PROVINCIA = "04"; // Almería
-const DELAY_MS = 1300; // ~45 peticiones/min para no chocar con el límite de AEMET
-const MAX_FALLOS = 0.2; // si falla más del 20 % de municipios, abortar (se queda online la versión anterior)
-
-// Caja aproximada de la provincia para filtrar estaciones (refinar luego con el polígono provincial)
-const BBOX = { latMin: 36.65, latMax: 37.95, lonMin: -3.2, lonMax: -1.6 };
-
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-// Decodifica cada secuencia UTF-8 válida como UTF-8 y cada byte suelto no válido como Latin-1
-function decodificarMixto(bytes: Uint8Array): string {
-  let out = "";
-  for (let i = 0; i < bytes.length; ) {
-    const b = bytes[i];
-    const largo = b >= 0xf0 && b <= 0xf4 ? 4 : b >= 0xe0 ? 3 : b >= 0xc2 && b <= 0xdf ? 2 : 1;
-    if (b >= 0x80 && largo > 1 && i + largo <= bytes.length) {
-      const seq = bytes.subarray(i, i + largo);
-      if (seq.subarray(1).every((c) => c >= 0x80 && c <= 0xbf)) {
-        out += new TextDecoder("utf-8").decode(seq);
-        i += largo;
-        continue;
-      }
-    }
-    out += String.fromCharCode(b);
-    i += 1;
-  }
-  return out;
-}
-
-async function getText(url: string, headers: Record<string, string> = {}): Promise<string> {
-  for (let intento = 1; intento <= 5; intento++) {
-    let res: Response;
-    try {
-      res = await fetch(url, { headers });
-    } catch (e) {
-      await sleep(intento * 5_000);
-      continue;
-    }
-    if (res.status === 429 || res.status >= 500) {
-      console.warn(`  ${res.status} en ${url}, reintento ${intento}`);
-      await sleep(intento * 15_000);
-      continue;
-    }
-    if (!res.ok) throw new Error(`${res.status} ${url}`);
-    const charset =
-      /charset=([^;]+)/i.exec(res.headers.get("content-type") ?? "")?.[1]?.trim().toLowerCase() ?? "utf-8";
-    const bytes = new Uint8Array(await res.arrayBuffer());
-    // AEMET declara ISO-8859-15 pero envía UTF-8, Latin-1 o ambos mezclados en el mismo archivo
-    try {
-      return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-    } catch {
-      return charset.startsWith("utf") ? new TextDecoder("utf-8").decode(bytes) : decodificarMixto(bytes);
-    }
-  }
-  throw new Error(`Demasiados reintentos: ${url}`);
-}
-
-// AEMET responde en dos pasos: { estado, datos } -> GET datos. Algunos endpoints maestros devuelven el array directamente.
-async function aemet<T>(endpoint: string): Promise<T> {
-  const primera = JSON.parse(await getText(`${AEMET}${endpoint}`, { api_key: KEY! }));
-  await sleep(DELAY_MS);
-  if (Array.isArray(primera)) return primera as T;
-  if (primera.estado !== 200 || !primera.datos) {
-    throw new Error(`AEMET ${endpoint}: ${primera.estado} ${primera.descripcion ?? ""}`);
-  }
-  const datos = JSON.parse(await getText(primera.datos));
-  await sleep(DELAY_MS);
-  return datos as T;
-}
-
-const slugify = (s: string) =>
-  s
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)/g, "");
-
-// El maestro de AEMET puede traer artículos pospuestos ("Ejido, El" o "Ejido (El)")
-const nombreNatural = (s: string) =>
-  s.trim().replace(/^(.+?),\s*(El|La|Los|Las)$|^(.+?)\s*\((El|La|Los|Las)\)$/, (_, a, b, c, d) => `${b ?? d} ${a ?? c}`);
-
-type MunicipioMaestro = {
-  id: string; // "id04013"
-  nombre: string;
-  latitud_dec: string;
-  longitud_dec: string;
-  altitud: string;
+// Forma mínima de cada fuente en meta.json (contrato de datos)
+const META_FUENTE: Record<string, Record<string, unknown>> = {
+  aemet: { actualizado: null, elaborado: null, modo: "cache", atom: { etag: null, lastModified: null } },
+  openMeteo: { actualizado: null, peso: 0 },
+  zonas: { actualizado: null, pasada: null, peso: 0 },
+  observaciones: { actualizado: null },
+  radar: { actualizado: null },
+  ria: { actualizado: null, ultimoDia: null },
 };
 
-type Municipio = { id: string; nombre: string; slug: string; lat: number; lon: number; altitud: number };
+type Consumo = {
+  dias: Record<string, { aemet: number; openMeteo: number; ejecuciones: number }>;
+  ejecuciones: { inicio: string; segundos: number; aemet: number; openMeteo: number; fuentes: Record<string, string> }[];
+};
+
+function leerArgumentos(argv: string[]) {
+  let forzar = false;
+  let solo: string | null = null;
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === "--forzar") forzar = true;
+    else if (a === "--solo") solo = argv[++i] ?? null;
+    else if (a.startsWith("--solo=")) solo = a.slice(7);
+    else console.warn(`AVISO: argumento desconocido "${a}"`);
+  }
+  if (solo != null) {
+    solo = solo.toLowerCase().replace(/[^a-z]/g, "");
+    if (!MODULOS.some((m) => m.nombre === solo)) throw new Error(`--solo: fuente desconocida "${solo}" (${MODULOS.map((m) => m.nombre).join(", ")})`);
+  }
+  return { forzar, solo };
+}
+
+const seg = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
 
 async function main() {
-  await mkdir(path.join(OUT, "municipios"), { recursive: true });
+  const inicio = new Date();
+  const { forzar, solo } = leerArgumentos(process.argv.slice(2));
+  const aemetKey = process.env.AEMET_API_KEY?.trim() || undefined;
+  if (!aemetKey && process.env.CI) throw new Error("Falta la variable de entorno AEMET_API_KEY");
+  if (!aemetKey) console.warn("AVISO: sin AEMET_API_KEY. Modo local: se saltan las fuentes AEMET y se conserva lo que hubiera en src/data/.");
 
-  // 1. Maestro de municipios
-  console.log("Municipios…");
-  let base: Omit<Municipio, "slug">[] = [];
-  if (KEY) {
+  await mkdir(path.join(DIR_DATOS, "municipios"), { recursive: true });
+
+  // meta.json anterior (puede no existir: caché vacía)
+  const previo = await leerJson<Partial<Meta> | null>(path.join(DIR_DATOS, "meta.json"), null);
+  const meta: Meta = { updatedAt: previo?.updatedAt ?? "", fallosAemet: previo?.fallosAemet ?? [], fuentes: { ...(previo?.fuentes ?? {}) } };
+  for (const [clave, defecto] of Object.entries(META_FUENTE)) meta.fuentes[clave] = { ...defecto, ...(meta.fuentes[clave] ?? {}) };
+  console.log(previo ? `Datos previos: última actualización ${meta.updatedAt || "desconocida"}` : "Sin datos previos (caché vacía)");
+
+  // Lista de municipios: siempre desde la semilla versionada
+  const municipios = await municipiosDesdeSemilla(DIR_RAIZ);
+  if (municipios.length < 100) throw new Error(`Solo ${municipios.length} municipios en scripts/municipios-almeria.json`);
+  await escribirJson(path.join(DIR_DATOS, "municipios.json"), municipios);
+
+  const ctx: Ctx = {
+    ahora: inicio,
+    dirDatos: DIR_DATOS,
+    dirRaiz: DIR_RAIZ,
+    meta,
+    forzar: forzar || solo != null,
+    aemetKey,
+    log: (msg) => console.log(msg),
+    yaPidioOpenMeteo: false,
+  };
+
+  let peticionesAemet = 0;
+  let pesoOpenMeteo = 0;
+  const estados: Record<string, string> = {};
+  for (const mod of MODULOS) {
+    if (solo && mod.nombre !== solo) continue;
+    const archivo = path.join(DIR_FUENTES, mod.archivo);
+    if (!existsSync(archivo)) {
+      if (mod.opcional) console.log(`[${mod.nombre}] no existe scripts/fuentes/${mod.archivo}: se salta`);
+      else console.warn(`[${mod.nombre}] FALTA scripts/fuentes/${mod.archivo}`);
+      estados[mod.clave] = "ausente";
+      continue;
+    }
+    const t0 = Date.now();
+    let r: ResultadoFuente;
     try {
-      const maestro = await aemet<MunicipioMaestro[]>("/maestro/municipios");
-      base = maestro
-        .map((m) => ({ ...m, id: m.id.replace(/^id/, "") }))
-        .filter((m) => m.id.startsWith(PREFIJO_PROVINCIA))
-        .map((m) => ({
-          id: m.id,
-          nombre: nombreNatural(m.nombre),
-          lat: Number(m.latitud_dec),
-          lon: Number(m.longitud_dec),
-          altitud: Number(m.altitud),
-        }));
+      const actualizar = (await import(pathToFileURL(archivo).href)).actualizar as Fuente | undefined;
+      if (typeof actualizar !== "function") throw new Error(`scripts/fuentes/${mod.archivo} no exporta actualizar`);
+      console.log(`[${mod.nombre}]…`);
+      r = await actualizar({ ...ctx, ahora: new Date() });
     } catch (e) {
-      console.warn(`  fallo maestro AEMET, uso la lista de respaldo: ${(e as Error).message}`);
+      // Los módulos no deberían lanzar; si lo hacen, se conserva lo anterior igualmente
+      r = { fuente: mod.clave, ok: false, cambiado: false, nota: `error no capturado: ${mensajeError(e)}` };
     }
-  }
-  const semilla: Omit<Municipio, "slug">[] = JSON.parse(await readFile(SEMILLA, "utf8"));
-  if (base.length < 100) base = semilla;
-  // El maestro de AEMET no incluye algún municipio reciente (p. ej. Balanegra, 04904): se completa con la lista de respaldo
-  const enMaestro = new Set(base.map((m) => m.id));
-  base.push(...semilla.filter((m) => !enMaestro.has(m.id)));
-  const municipios: Municipio[] = base
-    .map((m) => ({ ...m, slug: slugify(m.nombre) }))
-    .sort((a, b) => a.nombre.localeCompare(b.nombre, "es"));
-
-  if (municipios.length < 100) throw new Error(`Solo ${municipios.length} municipios; revisa el maestro`);
-  await writeFile(path.join(OUT, "municipios.json"), JSON.stringify(municipios));
-  console.log(`  ${municipios.length} municipios`);
-
-  // 2. Open-Meteo: una sola llamada con todas las coordenadas
-  console.log("Open-Meteo…");
-  const om = new URL("https://api.open-meteo.com/v1/forecast");
-  om.searchParams.set("latitude", municipios.map((m) => m.lat).join(","));
-  om.searchParams.set("longitude", municipios.map((m) => m.lon).join(","));
-  om.searchParams.set(
-    "hourly",
-    [
-      "temperature_2m",
-      "apparent_temperature",
-      "relative_humidity_2m",
-      "precipitation_probability",
-      "precipitation",
-      "weather_code",
-      "cloud_cover",
-      "wind_speed_10m",
-      "wind_direction_10m",
-      "wind_gusts_10m",
-      "uv_index",
-    ].join(",")
-  );
-  om.searchParams.set(
-    "daily",
-    "weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,wind_gusts_10m_max,uv_index_max,sunrise,sunset"
-  );
-  om.searchParams.set("timezone", "Europe/Madrid");
-  om.searchParams.set("forecast_days", "7");
-  om.searchParams.set("wind_speed_unit", "kmh");
-  const openMeteo: unknown[] = JSON.parse(await getText(om.toString()));
-
-  // 3. AEMET por municipio
-  const fallos: string[] = [];
-  for (const [i, m] of municipios.entries()) {
-    console.log(`[${i + 1}/${municipios.length}] ${m.nombre}`);
-    let aemetDiaria: unknown = null;
-    let aemetHoraria: unknown = null;
-    if (!KEY) {
-      fallos.push(m.id);
-    } else try {
-      [aemetDiaria] = await aemet<unknown[]>(`/prediccion/especifica/municipio/diaria/${m.id}`);
-      [aemetHoraria] = await aemet<unknown[]>(`/prediccion/especifica/municipio/horaria/${m.id}`);
-    } catch (e) {
-      console.warn(`  fallo AEMET: ${(e as Error).message}`);
-      fallos.push(m.id);
-    }
-    await writeFile(
-      path.join(OUT, "municipios", `${m.id}.json`),
-      JSON.stringify({ aemetDiaria, aemetHoraria, openMeteo: openMeteo[i] ?? null })
+    const clave = r.fuente || mod.clave;
+    if (r.metaFuente) meta.fuentes[clave] = { ...(meta.fuentes[clave] ?? {}), ...r.metaFuente };
+    if (r.pesoOpenMeteo !== undefined) ctx.yaPidioOpenMeteo = true;
+    peticionesAemet += r.peticionesAemet ?? 0;
+    pesoOpenMeteo += r.pesoOpenMeteo ?? 0;
+    estados[clave] = !r.ok ? "error" : r.cambiado ? "cambiado" : "sin cambios";
+    const consumo = [
+      r.peticionesAemet ? `${r.peticionesAemet} peticiones AEMET` : "",
+      r.pesoOpenMeteo ? `peso Open-Meteo ${r.pesoOpenMeteo}` : "",
+    ].filter(Boolean);
+    console.log(
+      `[${mod.nombre}] ${r.ok ? "ok" : "ERROR"}, ${r.cambiado ? "con datos nuevos" : "sin cambios"}, ${seg(Date.now() - t0)}` +
+        `${consumo.length ? ` (${consumo.join(", ")})` : ""}${r.nota ? `: ${r.nota}` : ""}`
     );
   }
-  if (KEY && fallos.length > municipios.length * MAX_FALLOS) {
-    throw new Error(`Fallaron ${fallos.length} municipios en AEMET; abortando para no publicar datos incompletos`);
+
+  // Todos los municipios tienen archivo, aunque sea vacío: el build nunca se rompe por un municipio
+  const ahoraMs = Date.now();
+  meta.fallosAemet = [];
+  let sinPrevision = 0;
+  for (const m of municipios) {
+    if (!existsSync(rutaMunicipio(DIR_DATOS, m.id))) await escribirJson(rutaMunicipio(DIR_DATOS, m.id), { aemetDiaria: null, aemetHoraria: null, openMeteo: null });
+    const d = await leerDatosMunicipio(DIR_DATOS, m.id);
+    const elaborado = msElaborado((d.aemetHoraria as { elaborado?: string } | null)?.elaborado);
+    const conAemet = Boolean(d.aemetHoraria && d.aemetDiaria) && ahoraMs - elaborado <= ANTIGUEDAD_FALLO_AEMET_MS;
+    if (!conAemet) meta.fallosAemet.push(m.id);
+    if (!conAemet && !d.openMeteo) sinPrevision++;
   }
 
-  // 4. Observaciones de estaciones (últimas 24 h), filtradas a la provincia
-  console.log("Observaciones…");
-  type Obs = { idema: string; lat: number; lon: number };
-  let observaciones: Obs[] = [];
-  if (KEY) try {
-    const todas = await aemet<Obs[]>("/observacion/convencional/todas");
-    observaciones = todas.filter(
-      (o) => o.lat >= BBOX.latMin && o.lat <= BBOX.latMax && o.lon >= BBOX.lonMin && o.lon <= BBOX.lonMax
-    );
-  } catch (e) {
-    console.warn(`  fallo observaciones: ${(e as Error).message}`);
-  }
-  await writeFile(path.join(OUT, "observaciones.json"), JSON.stringify(observaciones));
+  // updatedAt = hora del dato más reciente descargado de cualquier fuente
+  const tiempos = Object.values(meta.fuentes)
+    .map((f) => msIso((f as { actualizado?: string | null })?.actualizado))
+    .filter(Number.isFinite);
+  if (tiempos.length) meta.updatedAt = new Date(Math.max(...tiempos)).toISOString();
+  await escribirJson(path.join(DIR_DATOS, "meta.json"), meta);
 
-  await writeFile(
-    path.join(OUT, "meta.json"),
-    JSON.stringify({ updatedAt: new Date().toISOString(), fallosAemet: fallos })
+  // Registro de consumo (últimos 14 días y últimas 200 ejecuciones)
+  const segundos = Math.round((Date.now() - inicio.getTime()) / 100) / 10;
+  const rutaConsumo = path.join(DIR_DATOS, "consumo.json");
+  const consumo = await leerJson<Consumo>(rutaConsumo, { dias: {}, ejecuciones: [] });
+  const dia = inicio.toISOString().slice(0, 10); // los límites diarios de Open-Meteo van por día UTC
+  const total = consumo.dias[dia] ?? { aemet: 0, openMeteo: 0, ejecuciones: 0 };
+  consumo.dias[dia] = { aemet: total.aemet + peticionesAemet, openMeteo: total.openMeteo + pesoOpenMeteo, ejecuciones: total.ejecuciones + 1 };
+  consumo.dias = Object.fromEntries(Object.entries(consumo.dias).sort().slice(-14));
+  consumo.ejecuciones = [
+    ...consumo.ejecuciones,
+    { inicio: inicio.toISOString(), segundos, aemet: peticionesAemet, openMeteo: pesoOpenMeteo, fuentes: estados },
+  ].slice(-200);
+  await escribirJson(rutaConsumo, consumo);
+
+  console.log(
+    `Listo en ${segundos} s. Consumo: ${peticionesAemet} peticiones AEMET, peso Open-Meteo ${pesoOpenMeteo}` +
+      ` (hoy: ${consumo.dias[dia].aemet} AEMET, ${consumo.dias[dia].openMeteo} Open-Meteo en ${consumo.dias[dia].ejecuciones} ejecuciones).` +
+      ` Municipios sin AEMET: ${meta.fallosAemet.length}. Actualizado: ${meta.updatedAt || "sin datos"}`
   );
-  console.log(`Listo. Fallos AEMET: ${fallos.length}`);
+  if (sinPrevision > municipios.length * MAX_SIN_DATOS) {
+    throw new Error(`${sinPrevision} municipios sin ninguna previsión (ni AEMET ni Open-Meteo); se aborta para no publicar datos incompletos`);
+  }
 }
 
 main().catch((e) => {
-  console.error(e);
+  console.error(e instanceof Error ? e.message : e);
   process.exit(1);
 });
