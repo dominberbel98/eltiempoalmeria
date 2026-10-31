@@ -23,6 +23,21 @@ export type Hora = {
   cieloTxt: string;
   noche: boolean;
   aemet: boolean;
+  tormenta: number | null; // % de probabilidad de tormenta de AEMET del bloque de 6 h que contiene la hora
+};
+
+// Forma mínima de una hora para el meteograma (src/components/Meteograma.tsx). Vale para un municipio o una zona.
+export type HoraMeteograma = {
+  t: string; // "2026-10-28T14:00", hora local
+  temp: number | null;
+  prob: number | null; // %
+  precip: number | null; // mm
+  viento: number | null; // km/h
+  racha: number | null; // km/h
+  dir: number | null; // grados, de donde viene
+  cielo: Cielo;
+  noche: boolean;
+  tormenta?: number | null; // % AEMET por bloque de 6 h; ausente o null si no hay dato
 };
 
 export type Dia = {
@@ -38,6 +53,7 @@ export type Dia = {
   orto: string | null; // "08:12"
   ocaso: string | null;
   aemet: boolean;
+  tormentaMax: number | null; // % máximo de probabilidad de tormenta de AEMET entre los bloques del día
 };
 
 export type Prevision = {
@@ -141,11 +157,58 @@ function indexarAemetHoraria(d: DatosMunicipio): Map<string, AemetHora> {
   return mapa;
 }
 
+// --- Probabilidad de tormenta de AEMET ---
+// Solo viene en la predicción horaria, por bloques de 6 h: `probTormenta: [{ value: "20", periodo: "0107" }, …]`.
+// `periodo` es "HHhh": hora local de inicio (incluida) y de fin (excluida). Las etiquetas no son fijas
+// (en invierno 0107, 0713, 1319, 1901; en verano cambian), así que se interpretan siempre a partir del texto.
+// El bloque que cruza la medianoche (p. ej. "1901" del día D) cubre de 19 a 23 del día D y la hora 00 del día D+1.
+type DiaHorariaAemet = NonNullable<NonNullable<NonNullable<DatosMunicipio["aemetHoraria"]>["prediccion"]>["dia"]>[number];
+
+const lista = <T,>(x: T | T[] | null | undefined): T[] => (Array.isArray(x) ? x : x == null ? [] : [x]);
+const probTormentaDe = (dia: DiaHorariaAemet): AemetPeriodo[] => lista((dia as DiaHorariaAemet & { probTormenta?: AemetPeriodo | AemetPeriodo[] }).probTormenta);
+
+const sumarDia = (fecha: string, n: number) => new Date(Date.parse(fecha + "T00:00:00Z") + n * 86_400_000).toISOString().slice(0, 10);
+const dos = (n: number) => String(n).padStart(2, "0");
+
+// Horas locales ("2026-10-29T00:00") que cubre un bloque `periodo` del día `fecha` ("2026-10-28"). [] si el periodo no es "HHhh".
+export function horasDeBloque(fecha: string, periodo: string | undefined): string[] {
+  if (!periodo || !/^\d{4}$/.test(periodo)) return [];
+  const inicio = Number(periodo.slice(0, 2));
+  const fin = Number(periodo.slice(2, 4));
+  if (inicio > 23 || fin > 24) return [];
+  const duracion = (fin - inicio + 24) % 24;
+  const horas: string[] = [];
+  for (let k = 0; k < duracion; k++) {
+    const h = inicio + k;
+    horas.push(`${h >= 24 ? sumarDia(fecha, 1) : fecha}T${dos(h % 24)}:00`);
+  }
+  return horas;
+}
+
+// Índice hora local → % de tormenta, y máximo por día (bloques que AEMET agrupa bajo cada fecha).
+function indexarTormenta(d: DatosMunicipio): { porHora: Map<string, number | null>; maxDia: Map<string, number | null> } {
+  const porHora = new Map<string, number | null>();
+  const maxDia = new Map<string, number | null>();
+  for (const dia of lista(d.aemetHoraria?.prediccion?.dia)) {
+    const fecha = dia.fecha.slice(0, 10);
+    for (const bloque of probTormentaDe(dia)) {
+      const v = num(bloque.value);
+      const horas = horasDeBloque(fecha, bloque.periodo);
+      if (!horas.length) continue;
+      for (const t of horas) porHora.set(t, v);
+      if (v != null) maxDia.set(fecha, Math.max(maxDia.get(fecha) ?? 0, v));
+      else if (!maxDia.has(fecha)) maxDia.set(fecha, null);
+    }
+  }
+  return { porHora, maxDia };
+}
+
 const hhmm = (iso: string | undefined) => (iso ? iso.slice(11, 16) : null);
 
 export function construirPrevision(d: DatosMunicipio, ahora = horaLocal()): Prevision {
   const om = d.openMeteo;
   const aemetH = indexarAemetHoraria(d);
+  const tormenta = indexarTormenta(d);
   const aemetD = new Map((d.aemetDiaria?.prediccion?.dia ?? []).map((x) => [x.fecha.slice(0, 10), x]));
 
   // Días
@@ -173,6 +236,7 @@ export function construirPrevision(d: DatosMunicipio, ahora = horaLocal()): Prev
       orto: hhmm(om?.daily.sunrise[i]) ?? ortos.get(fecha)?.[0] ?? null,
       ocaso: hhmm(om?.daily.sunset[i]) ?? ortos.get(fecha)?.[1] ?? null,
       aemet: Boolean(a),
+      tormentaMax: tormenta.maxDia.get(fecha) ?? null,
     };
   });
   const solDe = new Map(dias.map((x) => [x.fecha, x]));
@@ -207,6 +271,7 @@ export function construirPrevision(d: DatosMunicipio, ahora = horaLocal()): Prev
       cieloTxt: a?.cielo ? a.cieloTxt || txtOm : txtOm,
       noche: esNoche(t),
       aemet: Boolean(a),
+      tormenta: tormenta.porHora.get(t) ?? null,
     });
   });
 
@@ -241,3 +306,45 @@ export const fechaHoraActualizacion = (iso: string) =>
   iso
     ? new Date(iso).toLocaleString("es-ES", { timeZone: ZONA, day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" })
     : "sin datos";
+
+// "28 de octubre de 2026 a las 16:45" (o "a la 01:05"), en hora de Madrid. "sin datos" si no hay fecha válida.
+export function textoActualizacion(iso: string | null | undefined): string {
+  if (!iso || Number.isNaN(Date.parse(iso))) return "sin datos";
+  const d = new Date(iso);
+  const fecha = d.toLocaleDateString("es-ES", { timeZone: ZONA, day: "numeric", month: "long", year: "numeric" });
+  const hora = d.toLocaleTimeString("es-ES", { timeZone: ZONA, hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+  return `${fecha} ${hora.startsWith("01:") ? "a la" : "a las"} ${hora}`;
+}
+
+// Horas transcurridas desde una fecha ISO (Infinity si no es válida).
+export const horasDesde = (iso: string | null | undefined, ahora = Date.now()) => {
+  const t = iso ? Date.parse(iso) : NaN;
+  return Number.isNaN(t) ? Infinity : (ahora - t) / 3_600_000;
+};
+
+// Nombre del día con su número, sin depender de Intl (mismo texto en el build y en el navegador):
+// "Jueves 29" o, corto, "Jue 29". `fecha` es "2026-10-29" (o una hora local "2026-10-29T14:00").
+const DIAS = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
+const DIAS_CORTOS = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"];
+export function diaConNumero(fecha: string, corto = false): string {
+  const d = new Date(fecha.slice(0, 10) + "T12:00:00Z");
+  return `${(corto ? DIAS_CORTOS : DIAS)[d.getUTCDay()]} ${d.getUTCDate()}`;
+}
+
+// Reduce las horas de construirPrevision a lo que necesita el meteograma, con los valores redondeados
+// (menos peso en el HTML de la isla).
+const r0 = (n: number | null) => (n == null ? null : Math.round(n));
+const r1 = (n: number | null) => (n == null ? null : Math.round(n * 10) / 10);
+export const aMeteograma = (horas: Hora[]): HoraMeteograma[] =>
+  horas.map((h) => ({
+    t: h.t,
+    temp: r1(h.temp),
+    prob: r0(h.prob),
+    precip: r1(h.precip),
+    viento: r0(h.viento),
+    racha: r0(h.racha),
+    dir: r0(h.dir),
+    cielo: h.cielo,
+    noche: h.noche,
+    tormenta: h.tormenta,
+  }));
