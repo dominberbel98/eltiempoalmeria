@@ -1,0 +1,366 @@
+---
+// /agro/: riego (ETo y balance), zonas de invernadero frente a interior, helada y calor, lluvia y viento acumulados
+// y estado de las estaciones de la Red de Información Agroclimática (RIA) de Andalucía en Almería.
+import Base from "../layouts/Base.astro";
+import {
+  comparacionZonas,
+  estadoEstaciones,
+  fechaDatosRia,
+  fechaDia,
+  fechaRelativa,
+  fmtLluvia,
+  fmtNum,
+  getAgro,
+  heladaCalorObservado,
+  heladaCalorPrevisto,
+  hoyMadrid,
+  resumenAgro,
+  tablaAcumulados,
+  tablaRiego,
+  unirNombres,
+  type EntradaPrevision,
+} from "../lib/agro";
+import { fichas } from "../lib/resumen";
+import { getArchivoZonas, resumenDiario, zonasDeMunicipio } from "../lib/zonas";
+
+const base = import.meta.env.BASE_URL;
+const agro = getAgro();
+const hoy = hoyMadrid();
+const resumen = resumenAgro(agro, hoy);
+const riego = tablaRiego(agro);
+const zonas = comparacionZonas(agro);
+const observado = heladaCalorObservado(agro);
+const acumulados = tablaAcumulados(agro);
+const estados = estadoEstaciones(agro);
+const pieRia = fechaDatosRia(agro);
+
+// Previsión para helada y calor: los 103 municipios (AEMET, o Open-Meteo si falta) y sus núcleos de población
+// con zona propia (Open-Meteo). Las zonas de sierra sin población no cuentan: no son zonas de cultivo.
+const entradas: EntradaPrevision[] = [];
+const nombrePorSlug = new Map<string, string>();
+for (const { municipio: m, prevision: p } of fichas()) {
+  nombrePorSlug.set(m.slug, m.nombre);
+  entradas.push({ nombre: m.nombre, slug: m.slug, dias: p.dias.map((d) => ({ fecha: d.fecha, min: d.min, max: d.max })) });
+  const archivo = getArchivoZonas(m.id);
+  if (!archivo) continue;
+  const { porZona } = resumenDiario(archivo);
+  for (const z of zonasDeMunicipio(m.id)) {
+    if (z.tipo !== "nucleo") continue;
+    const dias = porZona.get(z.id);
+    if (dias?.length) entradas.push({ nombre: `${z.nombre} (${m.nombre})`, slug: m.slug, dias: dias.map((d) => ({ fecha: d.fecha, min: d.min, max: d.max })) });
+  }
+}
+const previsto = heladaCalorPrevisto(entradas, 7, hoy);
+
+const fechaRef = resumen.fecha;
+const etiquetaDia = fechaRef ? (fechaRelativa(fechaRef, hoy).startsWith("ayer") ? "ayer" : `el ${fechaRef.slice(8, 10).replace(/^0/, "")}`) : "último día";
+// Frase de la previsión con enlace a la página del municipio donde se da el extremo
+const conEnlace = (texto: string | null, slug?: string) => ({ texto, slug, nombre: slug ? nombrePorSlug.get(slug) : undefined });
+const helada = conEnlace(previsto.fraseHelada, previsto.minima?.slug);
+const calor = conEnlace(previsto.fraseCalor, previsto.maxima?.slug);
+
+const unidad = (v: string, u: string) => (v === "—" ? v : `${v} ${u}`);
+const grados = (v: number | null) => (v == null ? "—" : `${fmtNum(v, 1)}°`);
+const pct = (v: number | null) => (v == null ? "—" : `${Math.round(v)} %`);
+const kmh = (v: number | null) => (v == null ? "—" : `${v} km/h`);
+const conservadas = estados.filter((e) => e.conservada).map((e) => e.nombre);
+
+const jsonLd = {
+  "@context": "https://schema.org",
+  "@type": "WebPage",
+  name: "Agro: riego, heladas y estaciones RIA en Almería",
+  url: new URL(`${base}agro/`, Astro.site).href,
+  inLanguage: "es-ES",
+  description: "Evapotranspiración, balance de riego, helada, calor, lluvia y viento de las estaciones agroclimáticas RIA de Almería.",
+};
+---
+
+<Base
+  title="Agro en Almería: riego, ETo, heladas y estaciones RIA"
+  description="Evapotranspiración de referencia y balance de riego, zonas de invernadero e interior, riesgo de helada y calor, lluvia y viento acumulados en las estaciones agroclimáticas RIA de Almería."
+  jsonLd={jsonLd}
+  activo="agro"
+  ria
+>
+  <section aria-labelledby="t-agro" class="flex flex-wrap items-end gap-x-14 gap-y-8">
+    <div class="flex flex-[1_1_480px] flex-col gap-3.5">
+      <h1 id="t-agro" class="titular text-[clamp(3.5rem,2.4rem+3.6vw,5.5rem)] leading-[0.88]">Riego, heladas y clima para el campo</h1>
+      <p class="max-w-[52ch] text-lg leading-normal text-gris-texto">
+        {
+          agro && resumen.fecha
+            ? `Datos medidos ${resumen.fechaTexto} por las ${resumen.estacionesConDato || resumen.estacionesActivas} estaciones activas de la Red de Información Agroclimática de la Junta de Andalucía en Almería.`
+            : "Datos de las estaciones de la Red de Información Agroclimática de la Junta de Andalucía en Almería."
+        }
+      </p>
+    </div>
+    {
+      agro && (
+        <div class="sobre-oscuro flex flex-[1_1_360px] flex-col gap-1.5 rounded-[4px] bg-basalto px-7 py-6">
+          <p class="text-suave-oscuro">Evapotranspiración de referencia media, {etiquetaDia}</p>
+          <p class="titular text-[clamp(4.5rem,3.8rem+2.4vw,6rem)] leading-[0.9]">
+            {fmtNum(resumen.et0Media, 1)}
+            {resumen.et0Media != null && <span class="text-4xl"> mm</span>}
+          </p>
+          {resumen.fraseBalance && <p class="leading-normal text-texto-oscuro">{resumen.fraseBalance}</p>}
+        </div>
+      )
+    }
+  </section>
+
+  {
+    !agro ? (
+      <p class="aviso">
+        Ahora mismo no hay datos de la Red de Información Agroclimática. Cuando se puedan descargar, aparecerán aquí la ETo, el balance de
+        riego y el estado de las estaciones.
+      </p>
+    ) : (
+      <>
+        <section aria-labelledby="t-riego" class="flex flex-col gap-3.5">
+          <div class="flex flex-wrap items-baseline justify-between gap-3">
+            <h2 id="t-riego" class="titular titular-2">ETo y riego</h2>
+            <p class="max-w-[60ch] text-[15px] text-ceniza">
+              El balance resta la ETo de la lluvia de los últimos 7 días: es el agua que el cultivo de referencia ha perdido y no ha
+              recibido.
+            </p>
+          </div>
+          {riego.filas.length ? (
+            <div class="tabla-desplazable" tabindex="0" role="region" aria-label="Tabla de ETo y riego">
+              <table class="tabla min-w-[760px] [&_td]:whitespace-nowrap">
+                <caption class="sr-only">Evapotranspiración, lluvia y balance de los últimos 7 días por estación, de mayor a menor déficit</caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Estación</th>
+                    <th scope="col" class="num">Altitud</th>
+                    <th scope="col" class="num">ETo {etiquetaDia}</th>
+                    <th scope="col" class="num">ETo 7 días</th>
+                    <th scope="col" class="num">Lluvia 7 días</th>
+                    <th scope="col" class="w-[34%]">Balance 7 días</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {riego.filas.map((f) => (
+                    <tr>
+                      <th scope="row">{f.nombre}</th>
+                      <td class="num text-ceniza">{f.altitud} m</td>
+                      <td class="num">{unidad(fmtNum(f.et0Ultimo, 1), "mm")}</td>
+                      <td class="num font-bold">
+                        {unidad(fmtNum(f.et0_7d, 1), "mm")}
+                        {f.parcial && f.et0_7d != null && <span class="block text-[13px] font-normal text-ceniza">{f.diasConEt0_7d} de 7 días</span>}
+                      </td>
+                      <td class="num texto-lluvia">{fmtLluvia(f.precip_7d)}</td>
+                      <td>
+                        <div class="flex items-center gap-2.5">
+                          <div class="h-2.5 min-w-0 flex-1" aria-hidden="true">
+                            <div class={`h-full rounded-[2px] ${f.deficit ? "bg-almagra" : "bg-mar"}`} style={`width:${f.anchoBarra}%`} />
+                          </div>
+                          <span class={`whitespace-nowrap font-bold ${f.deficit ? "" : "texto-lluvia"}`}>
+                            {f.balance_7d == null ? "—" : `${f.balance_7d > 0 ? "+" : ""}${fmtNum(f.balance_7d, 1)} mm`}
+                          </span>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p class="aviso aviso-info">Ninguna estación ha enviado datos de ETo ni de lluvia en los últimos 7 días.</p>
+          )}
+          {riego.notaSinDatos && <p class="nota">{riego.notaSinDatos}</p>}
+        </section>
+
+        <section aria-labelledby="t-zonas" class="flex flex-col gap-4">
+          <h2 id="t-zonas" class="titular titular-2">Zonas de invernadero e interior</h2>
+          <p class="texto-largo max-w-[70ch]">{zonas.nota}</p>
+          <div class="grid grid-cols-1 gap-6 md:grid-cols-2">
+            {zonas.grupos.map((g) => (
+              <section aria-labelledby={`t-${g.id}`} class={`border-t-[6px] pt-3.5 ${g.id === "invernadero" ? "border-mar" : "border-almagra"}`}>
+                <h3 id={`t-${g.id}`} class="titular titular-3 mb-2.5">{g.titulo}</h3>
+                <p class="mb-3 text-[15px] text-ceniza">{g.estacionesTexto}</p>
+                <dl class="grid grid-cols-2 gap-x-5 gap-y-3.5">
+                  <div>
+                    <dt class="text-sm text-ceniza">Máxima</dt>
+                    <dd class="titular text-[34px]">{grados(g.dia.tMax)}</dd>
+                  </div>
+                  <div>
+                    <dt class="text-sm text-ceniza">Mínima</dt>
+                    <dd class="titular text-[34px]">{grados(g.dia.tMin)}</dd>
+                  </div>
+                  <div>
+                    <dt class="text-sm text-ceniza">Humedad media</dt>
+                    <dd class="titular text-[34px]">{pct(g.dia.hrMed)}</dd>
+                  </div>
+                  <div>
+                    <dt class="text-sm text-ceniza">Radiación</dt>
+                    <dd class="titular text-[34px]">
+                      {fmtNum(g.dia.radiacion, 1)}
+                      {g.dia.radiacion != null && <span class="text-lg"> MJ/m²</span>}
+                    </dd>
+                  </div>
+                </dl>
+                <p class="nota mt-3">
+                  {g.usadas
+                    ? `Media de ${g.usadas === 1 ? "1 estación" : `${g.usadas} estaciones`} ${etiquetaDia === "ayer" ? "de ayer" : `del ${etiquetaDia.replace("el ", "")}`}.`
+                    : "Sin datos de este día."}
+                  {g.faltan.length > 0 && ` Sin dato: ${unirNombres(g.faltan)}.`}
+                </p>
+              </section>
+            ))}
+          </div>
+        </section>
+      </>
+    )
+  }
+
+  <section aria-labelledby="t-riesgo" class="flex flex-wrap gap-6">
+    <h2 id="t-riesgo" class="titular titular-2 flex-[1_1_100%]">Helada y calor</h2>
+    <div
+      class={`flex flex-[1_1_360px] flex-col gap-2 rounded-[4px] px-6 py-[22px] ${previsto.nivelHelada === "no" ? "bg-mar-fondo" : "bg-almagra-fondo"}`}
+    >
+      <h3 class="titular titular-4">{previsto.tituloHelada}</h3>
+      {
+        helada.texto && (
+          <p class="leading-[1.55] text-gris-texto">
+            {helada.texto}
+            {helada.slug && helada.nombre && (
+              <>
+                {" "}
+                <a href={`${base}${helada.slug}/`}>Ver la previsión de {helada.nombre}</a>.
+              </>
+            )}
+          </p>
+        )
+      }
+      {
+        previsto.municipiosHelada.length > 0 && (
+          <p class="leading-[1.55] text-gris-texto">Mínimas de 0 °C o menos en {unirNombres(previsto.municipiosHelada)}.</p>
+        )
+      }
+      {observado.fraseMinima && <p class="leading-[1.55] text-gris-texto">{observado.fraseMinima}</p>}
+      {
+        observado.heladas.length > 0 && (
+          <p class="leading-[1.55] text-gris-texto">
+            En los últimos {observado.dias} días ha helado en {unirNombres(observado.heladas.map((h) => `${h.nombre} (${h.dias === 1 ? "1 día" : `${h.dias} días`})`))}.
+          </p>
+        )
+      }
+    </div>
+    <div class={`flex flex-[1_1_360px] flex-col gap-2 rounded-[4px] px-6 py-[22px] ${previsto.nivelCalor === "no" ? "panel" : "bg-almagra-fondo"}`}>
+      <h3 class="titular titular-4">{previsto.tituloCalor}</h3>
+      {
+        calor.texto && (
+          <p class="leading-[1.55] text-gris-texto">
+            {calor.texto}
+            {calor.slug && calor.nombre && (
+              <>
+                {" "}
+                <a href={`${base}${calor.slug}/`}>Ver la previsión de {calor.nombre}</a>.
+              </>
+            )}
+          </p>
+        )
+      }
+      {
+        previsto.municipiosCalor.length > 0 && (
+          <p class="leading-[1.55] text-gris-texto">Máximas de 35 °C o más en {unirNombres(previsto.municipiosCalor)}.</p>
+        )
+      }
+      {observado.fraseMaxima && <p class="leading-[1.55] text-gris-texto">{observado.fraseMaxima}</p>}
+      {
+        observado.calor.length > 0 && (
+          <p class="leading-[1.55] text-gris-texto">
+            En los últimos {observado.dias} días se han superado los 35 °C en {unirNombres(observado.calor.map((h) => `${h.nombre} (${h.dias === 1 ? "1 día" : `${h.dias} días`})`))}.
+          </p>
+        )
+      }
+    </div>
+    <p class="nota flex-[1_1_100%]">
+      La previsión es la de los próximos 7 días para los 103 municipios (AEMET, u Open-Meteo si falta) y sus núcleos de población
+      (Open-Meteo). Lo medido es de las estaciones RIA{observado.hasta ? ` hasta el ${fechaDia(observado.hasta)}` : ""}.
+    </p>
+  </section>
+
+  {
+    agro && (
+      <section aria-labelledby="t-acum" class="flex flex-col gap-3.5">
+        <h2 id="t-acum" class="titular titular-2">Lluvia y viento acumulados</h2>
+        {acumulados.filas.length ? (
+          <div class="tabla-desplazable" tabindex="0" role="region" aria-label="Tabla de lluvia y viento acumulados">
+            <table class="tabla min-w-[640px] [&_td]:whitespace-nowrap">
+              <caption class="sr-only">Lluvia y racha máxima de viento de los últimos 7 y 30 días por estación</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Estación</th>
+                  <th scope="col" class="num">Lluvia 7 días</th>
+                  <th scope="col" class="num">Lluvia 30 días</th>
+                  <th scope="col" class="num">Racha máxima 7 días</th>
+                  <th scope="col" class="num">Racha máxima 30 días</th>
+                </tr>
+              </thead>
+              <tbody>
+                {acumulados.filas.map((f) => (
+                  <tr>
+                    <th scope="row">{f.nombre}</th>
+                    <td class="num">{fmtLluvia(f.precip_7d)}</td>
+                    <td class={`num ${f.destacaLluvia30 ? "texto-lluvia font-bold" : ""}`}>{fmtLluvia(f.precip_30d)}</td>
+                    <td class={`num ${f.destacaRacha7 ? "texto-almagra font-bold" : ""}`}>{kmh(f.racha_7d)}</td>
+                    <td class={`num ${f.destacaRacha30 ? "texto-almagra font-bold" : ""}`}>{kmh(f.racha_30d)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p class="aviso aviso-info">No hay datos de lluvia ni de viento de los últimos 30 días.</p>
+        )}
+        <p class="nota">En color, el valor más alto de cada columna.</p>
+      </section>
+    )
+  }
+
+  {
+    agro && estados.length > 0 && (
+      <section aria-labelledby="t-estado" class="flex flex-col gap-3.5">
+        <h2 id="t-estado" class="titular titular-2">Estado de las estaciones</h2>
+        <div class="tabla-desplazable" tabindex="0" role="region" aria-label="Tabla del estado de las estaciones">
+          <table class="tabla min-w-[520px] [&_td]:whitespace-nowrap">
+            <caption class="sr-only">Último día con datos y estado de cada estación RIA de Almería</caption>
+            <thead>
+              <tr>
+                <th scope="col">Estación</th>
+                <th scope="col" class="num">Altitud</th>
+                <th scope="col">Último dato</th>
+                <th scope="col">Estado</th>
+              </tr>
+            </thead>
+            <tbody>
+              {estados.map((e) => (
+                <tr class={e.estado === "ok" ? undefined : "destacada"}>
+                  <th scope="row">{e.nombre}</th>
+                  <td class="num text-ceniza">{e.altitud} m</td>
+                  <td>{e.ultimoDiaTexto}</td>
+                  <td>
+                    <span class="inline-flex items-center gap-2">
+                      <span
+                        class={`inline-block size-2.5 rounded-full ${e.estado === "ok" ? "bg-mar" : e.estado === "retrasada" ? "bg-almagra-claro" : "bg-almagra"}`}
+                        aria-hidden="true"
+                      />
+                      {e.estadoTexto}
+                      {e.estado !== "ok" && e.retrasoDias != null && ` (${e.retrasoDias} días)`}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p class="nota">
+          Al día: datos de hace 2 días o menos. Con retraso: de hace 3 a 7 días. Sin datos recientes: más de 7 días.
+          {conservadas.length > 0 && ` La última descarga de ${unirNombres(conservadas)} falló: se muestran sus datos anteriores.`}
+        </p>
+      </section>
+    )
+  }
+
+  {pieRia && <p slot="pie">{pieRia}</p>}
+</Base>
