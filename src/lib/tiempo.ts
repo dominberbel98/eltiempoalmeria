@@ -215,7 +215,10 @@ export function construirPrevision(d: DatosMunicipio, ahora = horaLocal()): Prev
   const fechas = om?.daily.time ?? [...aemetD.keys()];
   const ortos = new Map<string, [string | null, string | null]>();
   for (const dia of d.aemetHoraria?.prediccion?.dia ?? []) ortos.set(dia.fecha.slice(0, 10), [dia.orto ?? null, dia.ocaso ?? null]);
-  const dias: Dia[] = fechas.slice(0, 7).map((fecha, i) => {
+  // Sin días pasados: si los datos van con retraso, el primer día de la lista puede ser anterior a hoy
+  const desde = Math.max(0, fechas.findIndex((f) => f >= ahora.slice(0, 10)));
+  const dias: Dia[] = fechas.slice(desde, desde + 7).map((fecha, j) => {
+    const i = desde + j;
     const [cieloOm, txtOm] = cieloWmo(om?.daily.weather_code[i]);
     const a = aemetD.get(fecha);
     const periodo = (lista: AemetPeriodo[] | undefined) =>

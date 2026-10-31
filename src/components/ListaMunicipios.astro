@@ -4,6 +4,7 @@
 import IconoCielo from "./IconoCielo";
 import type { Ficha } from "../lib/resumen";
 import { fmt } from "../lib/tiempo";
+import { fmtAltitud } from "./mapa/escalas";
 
 type Props = {
   fichas: (Ficha & { km?: number })[];
@@ -32,7 +33,7 @@ const ordenadas = fichas.some((f) => f.km != null) ? fichas : [...fichas].sort((
             <span class="lm-nombre">
               <span class="lm-municipio">{m.nombre}</span>
               <span class="lm-detalle">
-                {km != null ? `A ${Math.round(km)} km, ${m.altitud.toLocaleString("es-ES")} m` : `${m.altitud.toLocaleString("es-ES")} m`}
+                {km != null ? `A ${Math.round(km)} km, ${fmtAltitud(m.altitud)}` : fmtAltitud(m.altitud)}
                 {p.actual?.cieloTxt ? `, ${p.actual.cieloTxt.toLowerCase()}` : ""}
               </span>
             </span>

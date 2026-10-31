@@ -37,7 +37,7 @@ type Props = {
   base: string;
   version: string;
   nombre: string;
-  zonaInicial?: string;
+  zonaInicial?: string | null;
   compacto?: boolean;
 };
 
@@ -293,15 +293,17 @@ export default function VistaZonas({ slug, base, version, nombre, zonaInicial, c
         setVariable(llueve ? "lluvia" : "min");
         setPorHoras(false);
         setHora(primeraHoraVigente(j.horas));
-        // La zona pedida: la prop o, en la página del municipio, ?zona= de la URL (la página es estática y no la conoce)
-        let pedida = zonaInicial;
-        if (!pedida && !compacto) {
+        // La zona pedida: en la página del municipio manda ?zona= de la URL (la página es estática y no la conoce);
+        // si no viene, la prop zonaInicial
+        let pedida: string | undefined;
+        if (!compacto) {
           try {
             pedida = new URLSearchParams(window.location.search).get("zona") ?? undefined;
           } catch {
             pedida = undefined;
           }
         }
+        pedida ??= zonaInicial ?? undefined;
         setZonaSel(zonaPorDefecto(j, pedida));
         setEstado({ tipo: "listo", datos: j });
       })
@@ -661,15 +663,18 @@ export default function VistaZonas({ slug, base, version, nombre, zonaInicial, c
         </div>
       )}
 
-      {compacto && datos && (
+      {compacto && (
         <>
-          <ul className="sr-only">
-            {datos.zonas.map((z) => (
-              <li key={z.id}>
-                {z.nombre}: {textoValor(valores.get(z.id) ?? null, variable, true)}
-              </li>
-            ))}
-          </ul>
+          {datos && (
+            <ul className="sr-only">
+              {datos.zonas.map((z) => (
+                <li key={z.id}>
+                  {z.nombre}: {textoValor(valores.get(z.id) ?? null, variable, true)}
+                </li>
+              ))}
+            </ul>
+          )}
+          {/* El único enlace a la página del municipio en el modo foco del mapa provincial (lleva la zona elegida) */}
           <p className="m-0">
             <a className="boton-claro" href={enlaceMunicipio}>
               Ver la página de {nombre}

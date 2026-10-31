@@ -109,8 +109,10 @@ const idTitulo = "titulo-semana";
     padding: 12px 0;
     border-top: 1px solid var(--color-linea);
   }
+  /* El fondo sobresale por los lados para que el texto y la barra queden alineados con las demás filas */
   .semana-dia-marcado {
     padding-inline: 6px;
+    margin-inline: -6px;
   }
   .semana-nombre {
     grid-area: nombre;
@@ -195,6 +197,7 @@ const idTitulo = "titulo-semana";
     }
     .semana-dia-marcado {
       padding-inline: 8px;
+      margin-inline: -8px;
     }
     .semana-cielo {
       font-size: 16px;

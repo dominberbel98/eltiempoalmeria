@@ -20,7 +20,7 @@ export const URL_NOTA_LEGAL_AEMET = "https://www.aemet.es/es/nota_legal";
 
 export type ImagenRadarPagina = {
   archivo: string;
-  src: string; // "/radar/2026-10-28T1930Z.gif"
+  src: string; // "{BASE_URL}radar/2026-10-28T1930Z.gif"
   hora: string | null; // ISO UTC
   aprox: boolean;
   horaMadrid: string; // "20:30"
@@ -105,7 +105,7 @@ export function datosRadar(ahora: Date = new Date()): DatosRadar {
     const minutosAntes = tUltima === null ? 0 : (tUltima - i.t) / 60_000;
     return {
       archivo: i.archivo,
-      src: `/radar/${i.archivo}`,
+      src: `${import.meta.env.BASE_URL}radar/${i.archivo}`,
       hora: i.hora,
       aprox: i.aprox,
       horaMadrid,

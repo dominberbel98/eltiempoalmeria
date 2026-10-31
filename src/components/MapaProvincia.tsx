@@ -519,7 +519,6 @@ export default function MapaProvincia({
           <button type="button" className="boton-claro" onClick={salirFoco}>
             Volver a la provincia
           </button>
-          <a href={`${base}${foco.slug}/`}>Ver la página de {foco.nombre}</a>
         </div>
         <Suspense fallback={<p className="mp-cargando">Cargando las zonas de {foco.nombre}…</p>}>
           <VistaZonas compacto slug={foco.slug} base={base} version={version} nombre={foco.nombre} />

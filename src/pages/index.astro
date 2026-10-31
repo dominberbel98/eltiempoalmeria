@@ -9,12 +9,12 @@ import IconoCielo from "../components/IconoCielo";
 import { getMeta } from "../lib/datos";
 import { fichas, sinAemet } from "../lib/resumen";
 import { fmt, rumbo, ZONA } from "../lib/tiempo";
+import { fmtAltitud } from "../components/mapa/escalas";
 
 const base = import.meta.env.BASE_URL;
 const meta = getMeta();
 const todas = fichas();
 const capital = todas.find((f) => f.municipio.id === "04013") ?? todas[0];
-const lista = todas.map(({ municipio: m }) => ({ nombre: m.nombre, slug: m.slug, lat: m.lat, lon: m.lon, altitud: m.altitud }));
 
 // Mapa: capa por defecto (lluvia si llueve en algún municipio en las próximas 48 h; si no, rachas) y la lista
 // lateral de la primera hora, para que se vea antes de cargar el JSON y coincida con él.
@@ -76,7 +76,7 @@ const jsonLd = {
   activo="prevision"
   ancho="completo"
 >
-  <div slot="buscador"><Buscador client:idle municipios={lista} base={base} /></div>
+  <div slot="buscador"><Buscador client:idle base={base} version={meta.updatedAt} /></div>
 
   <section class="banda-oscura" aria-labelledby="mp-titulo">
     <div class="contenedor">
@@ -161,7 +161,7 @@ const jsonLd = {
                   <th scope="row">
                     <a href={`${base}${m.slug}/`}>{m.nombre}</a>
                   </th>
-                  <td class="texto-secundario">{m.altitud.toLocaleString("es-ES")} m</td>
+                  <td class="texto-secundario">{fmtAltitud(m.altitud)}</td>
                   <td class="cifra provincia-ahora">{fmt(p.actual?.temp, "°")}</td>
                   <td>
                     {fmt(p.dias[0]?.max, "°")} / {fmt(p.dias[0]?.min, "°")}

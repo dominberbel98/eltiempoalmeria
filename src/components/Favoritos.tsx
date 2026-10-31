@@ -49,27 +49,3 @@ export function BotonFavorito({ slug, nombre, className = "" }: { slug: string; 
     </button>
   );
 }
-
-type Item = { nombre: string; slug: string; temp?: number | null };
-
-// Enlaces en pastilla a los municipios guardados ("Almería 24°"). Sin favoritos, muestra `porDefecto`.
-export function RinconesRapidos({ municipios, porDefecto, base }: { municipios: Item[]; porDefecto: string[]; base: string }) {
-  const [favs, setFavs] = useState<string[]>([]);
-  useEffect(() => setFavs(leer()), []);
-  const slugs = favs.length ? favs : porDefecto;
-  const lista = slugs.map((s) => municipios.find((m) => m.slug === s)).filter((m): m is Item => Boolean(m));
-  return (
-    <nav aria-label={favs.length ? "Tus municipios" : "Municipios destacados"}>
-      <ul className="flex flex-wrap gap-2" role="list">
-        {lista.map((m) => (
-          <li key={m.slug}>
-            <a className="boton-pastilla" href={`${base}${m.slug}/`}>
-              {m.nombre}
-              {m.temp != null && Number.isFinite(m.temp) ? ` ${Math.round(m.temp)}°` : ""}
-            </a>
-          </li>
-        ))}
-      </ul>
-    </nav>
-  );
-}

@@ -9,6 +9,7 @@ import TablaHoras from "../components/TablaHoras.astro";
 import Fuentes from "../components/Fuentes.astro";
 import Meteograma from "../components/Meteograma";
 import VistaZonas from "../components/VistaZonas";
+import Buscador from "../components/Buscador";
 import { getMeta } from "../lib/datos";
 import { cercanos, fichas, sinAemet, type Ficha } from "../lib/resumen";
 import { aMeteograma, fmt, horaLocal } from "../lib/tiempo";
@@ -84,6 +85,7 @@ const jsonLd = {
 ---
 
 <Base title={`El tiempo en ${m.nombre} (Almería) por horas`} description={descripcion} jsonLd={jsonLd} activo="prevision">
+  <div slot="buscador"><Buscador client:idle base={base} version={meta.updatedAt} /></div>
   <nav class="migas" aria-label="Migas de pan">
     <a href={base}><span class="migas-largo">Provincia de Almería</span><span class="migas-corto">Provincia</span></a> /{" "}
     <span aria-current="page">{m.nombre}</span>

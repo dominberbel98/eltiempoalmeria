@@ -10,7 +10,6 @@ import { fichas } from "../lib/resumen";
 const base = import.meta.env.BASE_URL;
 const meta = getMeta();
 const todas = fichas();
-const lista = todas.map(({ municipio: m }) => ({ nombre: m.nombre, slug: m.slug, lat: m.lat, lon: m.lon, altitud: m.altitud }));
 
 const llueve = todas.some((f) => f.prevision.horas.some((h) => (h.precip ?? 0) >= 0.1));
 const capaInicial = capaPorDefecto(llueve);
@@ -31,7 +30,7 @@ const destacadosIniciales = elegirDestacados(
   activo="mapa"
   ancho="completo"
 >
-  <div slot="buscador"><Buscador client:idle municipios={lista} base={base} /></div>
+  <div slot="buscador"><Buscador client:idle base={base} version={meta.updatedAt} /></div>
 
   <section class="banda-oscura" aria-labelledby="mp-titulo">
     <div class="contenedor">
