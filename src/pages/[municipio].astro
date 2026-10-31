@@ -1,14 +1,18 @@
 ---
-import { ArrowDown, Droplets, Info } from "lucide-react";
+// Página de cada municipio (Municipio.dc.html, Movil.dc.html y Zonas.dc.html).
+// Dos vistas en la misma página estática: "Vista general" (por defecto y sin JavaScript) y "Por zonas"
+// (solo si el municipio tiene 2 o más zonas). La vista elegida va en la URL: ?vista=zonas&zona=<id>.
 import Base from "../layouts/Base.astro";
 import Resumen from "../components/Resumen.astro";
+import Semana from "../components/Semana.astro";
+import TablaHoras from "../components/TablaHoras.astro";
 import Fuentes from "../components/Fuentes.astro";
-import ListaMunicipios from "../components/ListaMunicipios.astro";
-import IconoCielo from "../components/IconoCielo";
-import PrevisionHoraria from "../components/PrevisionHoraria";
-import MapaProvincia from "../components/MapaProvincia";
-import { cercanos, fichas, type Ficha } from "../lib/resumen";
-import { fechaCorta, fechaLarga, fmt, fmtMm, nombreDia, rumbo } from "../lib/tiempo";
+import Meteograma from "../components/Meteograma";
+import VistaZonas from "../components/VistaZonas";
+import { getMeta } from "../lib/datos";
+import { cercanos, fichas, sinAemet, type Ficha } from "../lib/resumen";
+import { aMeteograma, fmt, horaLocal } from "../lib/tiempo";
+import { diferencias, getArchivoZonas, resumenDiario, tieneVistaZonas, zonasDeMunicipio } from "../lib/zonas";
 
 export function getStaticPaths() {
   return fichas().map((ficha) => ({ params: { municipio: ficha.municipio.slug }, props: { ficha } }));
@@ -17,11 +21,41 @@ export function getStaticPaths() {
 const { ficha } = Astro.props as { ficha: Ficha };
 const { municipio: m, prevision: p } = ficha;
 const base = import.meta.env.BASE_URL;
-const hoy = p.dias[0];
+const meta = getMeta();
+// Días desde hoy (si los datos llevan días de retraso, no se muestran días pasados)
+const fechaHoy = horaLocal().slice(0, 10);
+const diasDesdeHoy = p.dias.filter((d) => d.fecha >= fechaHoy);
+const hoy = diasDesdeHoy[0] ?? p.dias[0];
 
-// Agrupa las 48 h por día para la tabla
-const porDia = new Map<string, typeof p.horas>();
-for (const h of p.horas) porDia.set(h.t.slice(0, 10), [...(porDia.get(h.t.slice(0, 10)) ?? []), h]);
+// --- AEMET o Open-Meteo ---
+const aemetHoras = p.horas.some((h) => h.aemet);
+const aemetDias = p.dias.some((d) => d.aemet);
+const usaAemet = aemetHoras || aemetDias;
+const faltaAemet = sinAemet(m.id) || !aemetHoras;
+const avisoFuente = !usaAemet
+  ? `No hay predicción de AEMET al día para ${m.nombre} en esta actualización: se muestran los datos del modelo Open-Meteo.`
+  : faltaAemet
+    ? `La predicción por horas de AEMET para ${m.nombre} no está al día en esta actualización: las horas se muestran con el modelo Open-Meteo.`
+    : null;
+
+// --- Zonas ---
+const zonas = zonasDeMunicipio(m.id);
+const conZonas = tieneVistaZonas(m.id);
+const archivoZonas = conZonas ? getArchivoZonas(m.id) : null;
+const hayDatosZonas = archivoZonas ? resumenDiario(archivoZonas).dias.length > 0 : false;
+const frases = hayDatosZonas ? diferencias(m.id) : [];
+const zonaCapital = zonas.find((z) => z.tipo === "capital") ?? zonas[0];
+// Miles con punto también en cifras de 4 dígitos ("1.178 m"), que toLocaleString("es-ES") deja sin separar
+const metros = (n: number) => `${String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ".")} m`;
+const altitudes = zonas.map((z) => z.altitud);
+const altMin = altitudes.length ? Math.min(...altitudes, m.altitud) : m.altitud;
+const altMax = altitudes.length ? Math.max(...altitudes, m.altitud) : m.altitud;
+const rangoTermino = conZonas && altMax - altMin >= 100 ? `el término va de ${metros(altMin)} a ${metros(altMax)}` : null;
+const subtitulo = `${m.id === "04013" ? "Capital de la provincia" : "Provincia de Almería"}, ${metros(m.altitud)} de altitud${rangoTermino ? `; ${rangoTermino}` : ""}`;
+
+// --- Otros ---
+const vecinos = cercanos(m, 8);
+const tormenta = p.horas.some((h) => h.tormenta != null);
 
 const descripcion = `Previsión del tiempo en ${m.nombre} (Almería) hora a hora: temperatura, lluvia, viento y rachas, humedad, UV y nubosidad para 48 horas y los próximos 7 días.${
   hoy ? ` Hoy, máxima de ${fmt(hoy.max, "°")} y mínima de ${fmt(hoy.min, "°")}.` : ""
@@ -32,7 +66,7 @@ const jsonLd = {
   name: `El tiempo en ${m.nombre} (Almería) por horas`,
   description: descripcion,
   inLanguage: "es-ES",
-  dateModified: new Date().toISOString(),
+  dateModified: meta.updatedAt || new Date().toISOString(),
   about: {
     "@type": "Place",
     name: m.nombre,
@@ -50,130 +84,318 @@ const jsonLd = {
 ---
 
 <Base title={`El tiempo en ${m.nombre} (Almería) por horas`} description={descripcion} jsonLd={jsonLd} activo="prevision">
-  <nav class="breadcrumb" aria-label="Migas de pan">
-    <a href={base}>Provincia de Almería</a><span aria-hidden="true">›</span><span aria-current="page">{m.nombre}</span>
+  <nav class="migas" aria-label="Migas de pan">
+    <a href={base}><span class="migas-largo">Provincia de Almería</span><span class="migas-corto">Provincia</span></a> /{" "}
+    <span aria-current="page">{m.nombre}</span>
   </nav>
 
-  <div style="padding-top:18px"></div>
+  <Resumen municipio={m} prevision={p} titular subtitulo={subtitulo} />
+
   {
-    !p.aemet && (
-      <div class="notice" role="note">
-        <Info size={18} aria-hidden="true" />
-        <span>
-          No hay predicción de AEMET disponible para {m.nombre} en esta actualización. Se muestran los datos del modelo Open-Meteo.
-        </span>
+    avisoFuente && (
+      <p class="aviso aviso-info" role="note" data-solo-general>
+        {avisoFuente}
+      </p>
+    )
+  }
+
+  {
+    conZonas && (
+      <div class="vista-barra">
+        <div class="segmentado" role="group" aria-label="Cómo ver la previsión">
+          <button type="button" aria-pressed="true" data-ir-vista="general">
+            Vista general
+          </button>
+          <button type="button" aria-pressed="false" data-ir-vista="zonas">
+            Por zonas
+          </button>
+        </div>
+        <p class="texto-secundario vista-barra-nota">
+          {zonas.length} zonas del término{rangoTermino ? `, de ${metros(altMin)} a ${metros(altMax)} de altitud` : ""}
+        </p>
       </div>
     )
   }
 
-  <Resumen municipio={m} prevision={p} titular />
-
-  <section class="hourly card" aria-label="Previsión hora a hora">
-    <PrevisionHoraria client:visible horas={p.horas} nombre={m.nombre} />
-  </section>
-
-  <details class="detail">
-    <summary>Detalle de las próximas 48 horas</summary>
-    <div class="table-scroll">
-      <table class="hours-table">
-        <caption class="sr-only">Previsión horaria en {m.nombre} para las próximas 48 horas</caption>
-        <thead>
-          <tr>
-            <th scope="col">Hora</th>
-            <th scope="col" style="text-align:left">Cielo</th>
-            <th scope="col">Temp.</th>
-            <th scope="col">Sensación</th>
-            <th scope="col"><abbr title="Probabilidad de precipitación">Prob.</abbr></th>
-            <th scope="col">Lluvia (mm)</th>
-            <th scope="col">Viento (km/h)</th>
-            <th scope="col">Rachas</th>
-            <th scope="col">Humedad</th>
-            <th scope="col">UV</th>
-            <th scope="col">Nubes</th>
-          </tr>
-        </thead>
-        {
-          [...porDia].map(([fecha, horas]) => (
-            <tbody>
-              <tr class="day-row">
-                <th colspan="11" scope="colgroup">
-                  {fechaLarga(fecha)}
-                </th>
-              </tr>
-              {horas.map((h) => (
-                <tr>
-                  <th scope="row" style="font-weight:600">{h.t.slice(11, 16)}</th>
-                  <td class="sky">
-                    <span>
-                      <IconoCielo cielo={h.cielo} noche={h.noche} size={20} />
-                      {h.cieloTxt}
-                    </span>
-                  </td>
-                  <td><strong>{fmt(h.temp, "°")}</strong></td>
-                  <td>{fmt(h.sens, "°")}</td>
-                  <td>{fmt(h.prob, " %")}</td>
-                  <td>{fmtMm(h.precip)}</td>
-                  <td>
-                    {h.dir != null && <ArrowDown size={12} className="wind-arrow" style={{ transform: `rotate(${h.dir}deg)` }} aria-hidden="true" />}{" "}
-                    {rumbo(h.dir)} {fmt(h.viento)}
-                  </td>
-                  <td>{fmt(h.racha)}</td>
-                  <td>{fmt(h.hum, " %")}</td>
-                  <td>{fmt(h.uv)}</td>
-                  <td>{fmt(h.nubes, " %")}</td>
-                </tr>
+  {
+    hayDatosZonas &&
+      (frases.length ? (
+        <section class="panel diferencias" aria-labelledby="titulo-diferencias">
+          <h2 id="titulo-diferencias" class="titular titular-3 diferencias-titulo">
+            Cambia mucho dentro del municipio
+          </h2>
+          <div class="diferencias-cuerpo">
+            <ul class="diferencias-lista">
+              {frases.map((f) => (
+                <li>{f}</li>
               ))}
-            </tbody>
-          ))
-        }
-      </table>
-    </div>
-  </details>
+            </ul>
+            <button type="button" class="boton diferencias-boton" data-ir-vista="zonas" data-solo-general>
+              Ver por zonas
+            </button>
+          </div>
+        </section>
+      ) : (
+        <div class="panel diferencias diferencias-parecido">
+          <p>El tiempo será parecido en todo el término municipal.</p>
+          <button type="button" class="boton-pastilla diferencias-boton" data-ir-vista="zonas" data-solo-general>
+            Ver por zonas
+          </button>
+        </div>
+      ))
+  }
 
-  <section class="week" aria-labelledby="titulo-semana">
-    <div class="section-top">
-      <div>
-        <div class="eyebrow">UN POCO MÁS ALLÁ</div>
-        <h2 id="titulo-semana">Los próximos 7 días en {m.nombre}</h2>
-      </div>
-      <span class="muted desktop-only">Máxima, mínima y probabilidad de lluvia <ArrowDown size={14} aria-hidden="true" /></span>
+  <div class="vista" data-vista="general">
+    <div class="vista-horas">
+      <Meteograma client:visible horas={aMeteograma(p.horas)} titulo="Las próximas horas" />
+      <TablaHoras horas={p.horas} nombre={m.nombre} />
     </div>
-    <ol class="week-grid">
+
+    <Semana dias={diasDesdeHoy.length ? diasDesdeHoy : p.dias} hoy={fechaHoy} />
+  </div>
+
+  {
+    conZonas && (
+      <div class="vista" data-vista="zonas" hidden>
+        <h2 class="sr-only">{m.nombre} por zonas</h2>
+        <VistaZonas client:visible slug={m.slug} base={base} version={meta.updatedAt} nombre={m.nombre} zonaInicial={zonaCapital?.id ?? null} />
+      </div>
+    )
+  }
+
+  <Fuentes
+    id={m.id}
+    nombre={m.nombre}
+    aemet={usaAemet}
+    elaborado={p.elaborado}
+    tormenta={tormenta}
+    zonas={conZonas && zonaCapital ? { capital: zonaCapital.nombre, cuantas: zonas.length } : null}
+  />
+
+  <section class="cerca" aria-labelledby="titulo-cerca">
+    <h2 id="titulo-cerca" class="titular titular-3">Cerca de {m.nombre}</h2>
+    <ul class="cerca-lista" role="list">
       {
-        p.dias.map((d, i) => (
-          <li class="day-card">
-            <h3>{nombreDia(d.fecha, i)}</h3>
-            <small>{fechaCorta(d.fecha)}</small>
-            <IconoCielo cielo={d.cielo} size={32} />
-            <span class="sky-txt">{d.cieloTxt}</span>
-            <div>
-              <strong><span class="sr-only">Máxima </span>{fmt(d.max, "°")}</strong>
-              <span><span class="sr-only">Mínima </span>{fmt(d.min, "°")}</span>
-            </div>
-            <small class="rain">
-              <Droplets size={12} aria-hidden="true" />
-              <span class="sr-only">Probabilidad de lluvia </span>
-              {fmt(d.prob, "%")}
-            </small>
+        vecinos.map((v) => (
+          <li>
+            <a class="boton-pastilla" href={`${base}${v.municipio.slug}/`}>
+              {v.municipio.nombre}
+              {v.prevision.actual?.temp != null && (
+                <span>
+                  <span class="sr-only">, ahora </span>
+                  {fmt(v.prevision.actual.temp, "°")}
+                </span>
+              )}
+            </a>
           </li>
         ))
       }
-    </ol>
+    </ul>
+    <nav class="cerca-secciones" aria-label="Secciones">
+      <a class="boton" href={`${base}mapa/`}>Mapa por horas</a>
+      <a class="boton" href={`${base}radar/`}>Radar</a>
+    </nav>
   </section>
 
-  <section id="provincia" class="province-section" aria-labelledby="titulo-cerca">
-    <div class="section-top">
-      <div>
-        <div class="eyebrow">CADA RINCÓN, SU CIELO</div>
-        <h2 id="titulo-cerca">Alrededor de {m.nombre}</h2>
-        <p class="muted">Lluvia, viento y temperatura hora a hora en cada municipio, y los más cercanos a {m.nombre}.</p>
-      </div>
-    </div>
-    <div class="province-content">
-      <MapaProvincia client:visible base={base} seleccionado={m.slug} />
-      <ListaMunicipios fichas={cercanos(m)} titulo="Municipios cercanos" />
-    </div>
-  </section>
-
-  <Fuentes id={m.id} nombre={m.nombre} aemet={p.aemet} elaborado={p.elaborado} />
+  {
+    conZonas && (
+      <script is:inline>
+        // Conmutador "Vista general" / "Por zonas". Va en línea y al final del contenido para aplicar la vista de la URL
+        // antes de pintar (sin parpadeo). Sin JavaScript se ve siempre la vista general.
+        (function () {
+          var porVista = function (v) {
+            return document.querySelectorAll(v === "general" ? '[data-vista="general"], [data-solo-general]' : '[data-vista="zonas"]');
+          };
+          var segmentos = document.querySelectorAll('.vista-barra [data-ir-vista]');
+          var actual = null;
+          var aplicar = function (v) {
+            if (v === actual) return;
+            actual = v;
+            porVista("general").forEach(function (el) { el.hidden = v !== "general"; });
+            porVista("zonas").forEach(function (el) { el.hidden = v !== "zonas"; });
+            segmentos.forEach(function (b) { b.setAttribute("aria-pressed", String(b.getAttribute("data-ir-vista") === v)); });
+            document.documentElement.setAttribute("data-vista-municipio", v);
+            window.dispatchEvent(new CustomEvent("vista-municipio", { detail: { vista: v } }));
+          };
+          var desdeUrl = function () {
+            return new URLSearchParams(location.search).get("vista") === "zonas" ? "zonas" : "general";
+          };
+          aplicar(desdeUrl());
+          document.querySelectorAll("[data-ir-vista]").forEach(function (b) {
+            b.addEventListener("click", function () {
+              var v = b.getAttribute("data-ir-vista") === "zonas" ? "zonas" : "general";
+              if (v !== actual) {
+                var url = new URL(location.href);
+                if (v === "zonas") url.searchParams.set("vista", "zonas");
+                else url.searchParams.delete("vista");
+                history.pushState(null, "", url);
+                aplicar(v);
+              }
+              // Si el botón pulsado se ha ocultado ("Ver por zonas"), el foco pasa al conmutador
+              if (b.hidden || b.closest("[hidden]")) {
+                var destino = document.querySelector('.vista-barra [data-ir-vista="' + v + '"]');
+                if (destino) {
+                  destino.focus();
+                  destino.scrollIntoView({ block: "start", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+                }
+              }
+            });
+          });
+          window.addEventListener("popstate", function () { aplicar(desdeUrl()); });
+        })();
+      </script>
+    )
+  }
 </Base>
+
+<style>
+  .migas-corto {
+    display: none;
+  }
+  @media (max-width: 47.99rem) {
+    .migas {
+      font-size: 14px;
+    }
+    .migas-largo {
+      display: none;
+    }
+    .migas-corto {
+      display: inline;
+    }
+  }
+
+  /* Conmutador de vista (solo con JavaScript) */
+  .vista-barra {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 20px;
+  }
+  .vista-barra-nota {
+    margin: 0;
+    font-size: 15px;
+  }
+  .vista-barra .segmentado > button {
+    font-size: 16px;
+    padding-inline: 20px;
+  }
+  :global(html:not(.js)) .vista-barra,
+  :global(html:not(.js)) .diferencias-boton {
+    display: none;
+  }
+
+  /* Diferencias entre zonas (Zonas.dc.html) */
+  .diferencias {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px 48px;
+    padding: 20px;
+  }
+  .diferencias-titulo {
+    margin: 0;
+    flex: 1 1 100%;
+    line-height: 1.05;
+  }
+  .diferencias-cuerpo {
+    flex: 1 1 520px;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 16px;
+  }
+  .diferencias-lista {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    font-size: 17px;
+    line-height: 1.45;
+  }
+  .diferencias-parecido {
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px 24px;
+    padding-block: 14px;
+  }
+  .diferencias-parecido p {
+    margin: 0;
+    font-size: 17px;
+  }
+  @media (min-width: 48rem) {
+    .diferencias {
+      padding: 24px 28px;
+    }
+    .diferencias-titulo {
+      flex: 0 0 240px;
+    }
+    .diferencias-lista {
+      font-size: 18px;
+    }
+    .diferencias-parecido {
+      padding-block: 16px;
+    }
+  }
+
+  /* Vistas: mismas separaciones que .pagina */
+  .vista {
+    display: flex;
+    flex-direction: column;
+    gap: 32px;
+  }
+  .vista-horas {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  @media (min-width: 48rem) {
+    .vista {
+      gap: 48px;
+    }
+    .vista-horas {
+      gap: 16px;
+    }
+  }
+
+  /* Municipios cercanos y accesos (Movil.dc.html) */
+  .cerca {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .cerca h2 {
+    margin: 0;
+  }
+  .cerca-lista {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .cerca-lista .boton-pastilla {
+    gap: 6px;
+  }
+  .cerca-secciones {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .cerca-secciones .boton {
+    justify-content: flex-start;
+    min-height: 56px;
+    padding-inline: 16px;
+    font-weight: 700;
+  }
+  @media (min-width: 48rem) {
+    .cerca-secciones {
+      display: flex;
+    }
+    .cerca-secciones .boton {
+      min-height: 48px;
+      padding-inline: 20px;
+    }
+  }
+</style>

@@ -1,61 +1,111 @@
 ---
-import { ArrowUpRight } from "lucide-react";
+// "De dónde salen los datos". Con `nombre`, explica la previsión de un municipio; sin él, la de toda la web (portada).
 import { getMeta } from "../lib/datos";
-import { fechaHoraActualizacion } from "../lib/tiempo";
+import { textoActualizacion } from "../lib/tiempo";
 
-type Props = { id?: string; nombre?: string; aemet?: boolean; elaborado?: string | null };
-const { id, nombre, aemet, elaborado } = Astro.props;
+type Props = {
+  id?: string;
+  nombre?: string;
+  // La previsión del municipio usa AEMET (si es false, todo es de Open-Meteo)
+  aemet?: boolean;
+  // `elaborado` de AEMET: UTC sin "Z", tal cual lo da AEMET
+  elaborado?: string | null;
+  // Hay alguna hora con probabilidad de tormenta de AEMET
+  tormenta?: boolean;
+  // El municipio tiene vista por zonas: nombre de la zona capital
+  zonas?: { capital: string; cuantas: number } | null;
+};
+const { id, nombre, aemet, elaborado, tormenta = false, zonas = null } = Astro.props;
 const meta = getMeta();
 const fallos = meta.fallosAemet.length;
+const conZona = (s: string) => (/[zZ]|[+-]\d\d:?\d\d$/.test(s.slice(10)) ? s : `${s}Z`);
+const elaboradoTexto = elaborado ? textoActualizacion(conZona(elaborado)) : null;
+const openMeteo = meta.fuentes.openMeteo?.actualizado ?? meta.updatedAt;
 ---
 
-<section id="fuentes" class="sources">
-  <div class="source-intro">
-    <span class="eyebrow">CON LOS PIES EN LA TIERRA</span>
-    <h2>Un cielo bonito.<br />Datos transparentes.</h2>
-    <p>
-      El tiempo cambia. Por eso te contamos de dónde sale cada dato y cuándo se ha consultado. La web se regenera cada hora con
-      los últimos datos publicados.
-    </p>
-  </div>
-  <div class="source-detail">
-    <div>
-      <span class="source-number">01</span>
-      <div>
-        <h3>Predicción oficial · AEMET</h3>
-        {
-          nombre ? (
+<section class="fuentes" aria-labelledby="titulo-fuentes">
+  <h2 id="titulo-fuentes" class="fuentes-titulo">De dónde salen los datos</h2>
+  <div class="fuentes-texto">
+    {
+      nombre ? (
+        <>
+          <p>
+            {aemet
+              ? `Temperatura, sensación, humedad, lluvia y estado del cielo: predicción municipal de AEMET${elaboradoTexto && elaboradoTexto !== "sin datos" ? `, elaborada el ${elaboradoTexto}` : ""}.`
+              : `En esta actualización no hay predicción de AEMET al día para ${nombre}: toda la previsión de esta página es del modelo Open-Meteo.`}
+            {tormenta && " La probabilidad de tormenta es de AEMET, por bloques de 6 horas."}
+          </p>
+          <p>
+            Viento, rachas, UV y nubosidad: modelo <a href="https://open-meteo.com/">Open-Meteo</a> para las coordenadas del municipio. Son
+            estimaciones de modelo, no medidas de una estación.
+          </p>
+          {zonas && (
             <p>
-              {aemet
-                ? `Temperatura, sensación térmica, humedad, precipitación y estado del cielo de ${nombre} proceden de la predicción municipal de AEMET${elaborado ? ` (elaborada el ${elaborado.slice(8, 10)}/${elaborado.slice(5, 7)} a las ${elaborado.slice(11, 16)})` : ""}.`
-                : `En esta actualización no hay predicción de AEMET disponible para ${nombre}; toda la previsión procede del modelo Open-Meteo.`}
+              Vista por zonas: estimación del modelo Open-Meteo en {zonas.cuantas} zonas del término, con celdas de unos 6 km y la temperatura
+              corregida por altitud. Fuera de {zonas.capital}, las zonas solo tienen datos de Open-Meteo: AEMET no predice por zonas y su
+              predicción oficial es para el municipio entero, la de la vista general.
             </p>
-          ) : (
-            <p>
-              Predicción municipal diaria y horaria de AEMET para los 103 municipios.
-              {fallos > 0 && ` En esta actualización faltan ${fallos} municipios, que se muestran con datos de Open-Meteo.`}
-            </p>
-          )
-        }
-        <a class="text-link" rel="noopener" href={`https://www.aemet.es/es/eltiempo/prediccion/municipios?id=${id ?? "04013"}`}>
-          Previsión municipal en aemet.es <ArrowUpRight size={14} aria-hidden="true" />
-        </a>
-        <a class="text-link" rel="noopener" href="https://www.aemet.es/es/eltiempo/prediccion/avisos">
-          Avisos oficiales para Almería <ArrowUpRight size={14} aria-hidden="true" />
-        </a>
-      </div>
-    </div>
-    <div>
-      <span class="source-number">02</span>
-      <div>
-        <h3>Modelo horario · Open-Meteo</h3>
-        <p>
-          Viento, rachas, dirección, índice UV, nubosidad y probabilidad horaria de precipitación proceden de{" "}
-          <a href="https://open-meteo.com/" rel="noopener">Open-Meteo</a>, calculados para las coordenadas de cada municipio. Son
-          estimaciones de modelo, no lecturas de estación.
-        </p>
-        <small>Última descarga: {fechaHoraActualizacion(meta.updatedAt)}</small>
-      </div>
-    </div>
+          )}
+          <p class="fuentes-enlaces">
+            <a href={`https://www.aemet.es/es/eltiempo/prediccion/municipios?id=${id ?? "04013"}`}>Previsión de {nombre} en aemet.es</a>
+            <a href="https://www.aemet.es/es/eltiempo/prediccion/avisos">Avisos oficiales para Almería</a>
+          </p>
+        </>
+      ) : (
+        <>
+          <p>
+            Temperatura, humedad, lluvia y estado del cielo: predicción municipal de AEMET para los 103 municipios.
+            {fallos > 0 && ` En esta actualización faltan ${fallos} municipios, que se muestran con datos del modelo Open-Meteo.`}
+          </p>
+          <p>
+            Viento, rachas, UV y nubosidad: modelo <a href="https://open-meteo.com/">Open-Meteo</a> para las coordenadas de cada municipio.
+            Última descarga: {textoActualizacion(openMeteo)}.
+          </p>
+          <p class="fuentes-enlaces">
+            <a href="https://www.aemet.es/es/eltiempo/prediccion/avisos">Avisos oficiales para Almería</a>
+          </p>
+        </>
+      )
+    }
   </div>
 </section>
+
+<style>
+  .fuentes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px 48px;
+    border-top: 1px solid var(--color-linea);
+    padding-top: 24px;
+    font-size: 15px;
+    line-height: 1.6;
+    color: var(--color-gris-texto);
+  }
+  .fuentes-titulo {
+    margin: 0;
+    flex: 0 0 200px;
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--color-basalto);
+  }
+  .fuentes-texto {
+    flex: 1 1 360px;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr));
+    gap: 12px 48px;
+  }
+  .fuentes-texto p {
+    margin: 0;
+    max-width: 62ch;
+  }
+  .fuentes-enlaces {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 24px;
+  }
+  .fuentes-enlaces a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+</style>

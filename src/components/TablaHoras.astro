@@ -1,0 +1,139 @@
+---
+// Tabla completa por horas (plegada en <details>): todas las variables de las próximas 48 h.
+// Es además la alternativa accesible del meteograma, con los mismos datos.
+import IconoCielo from "./IconoCielo";
+import { fechaLarga, fmt, fmtMm, rumbo, type Hora } from "../lib/tiempo";
+
+type Props = { horas: Hora[]; nombre: string; resumen?: string };
+const { horas, nombre, resumen = "Ver la tabla completa: sensación, humedad, UV y nubosidad por horas" } = Astro.props;
+
+const porDia = new Map<string, Hora[]>();
+for (const h of horas) {
+  const fecha = h.t.slice(0, 10);
+  porDia.set(fecha, [...(porDia.get(fecha) ?? []), h]);
+}
+const conTormenta = horas.some((h) => h.tormenta != null);
+const columnas = conTormenta ? 13 : 12;
+const RACHA_DESTACADA = 20;
+const idTabla = "tabla-horas";
+---
+
+<details class="tabla-horas">
+  <summary class="enlace-fuerte">{resumen}</summary>
+  <div class="tabla-desplazable tabla-horas-scroll" role="region" aria-labelledby={`${idTabla}-titulo`} tabindex="0">
+    <table class="tabla tabla-horas-tabla" id={idTabla}>
+      <caption id={`${idTabla}-titulo`} class="sr-only">Previsión por horas en {nombre} para las próximas 48 horas</caption>
+      <thead>
+        <tr>
+          <th scope="col">Hora</th>
+          <th scope="col">Cielo</th>
+          <th scope="col" class="num">Temperatura</th>
+          <th scope="col" class="num">Sensación</th>
+          <th scope="col" class="num">Prob. de lluvia</th>
+          <th scope="col" class="num">Lluvia (mm)</th>
+          {conTormenta && <th scope="col" class="num">Tormenta</th>}
+          <th scope="col">Viento (km/h)</th>
+          <th scope="col" class="num">Rachas (km/h)</th>
+          <th scope="col" class="num">Humedad</th>
+          <th scope="col" class="num">UV</th>
+          <th scope="col" class="num">Nubosidad</th>
+          <th scope="col">Fuente</th>
+        </tr>
+      </thead>
+      {
+        [...porDia].map(([fecha, lista]) => (
+          <tbody>
+            <tr class="tabla-horas-dia">
+              <th colspan={columnas} scope="colgroup">
+                {fechaLarga(fecha)}
+              </th>
+            </tr>
+            {lista.map((h) => (
+              <tr class:list={{ lluviosa: (h.precip ?? 0) >= 0.5 }}>
+                <th scope="row">{h.t.slice(11, 16)}</th>
+                <td>
+                  <span class="tabla-horas-cielo">
+                    <IconoCielo cielo={h.cielo} noche={h.noche} size={20} />
+                    {h.cieloTxt}
+                  </span>
+                </td>
+                <td class="num">
+                  <strong>{fmt(h.temp, "°")}</strong>
+                </td>
+                <td class="num">{fmt(h.sens, "°")}</td>
+                <td class="num texto-lluvia">{fmt(h.prob, " %")}</td>
+                <td class="num">{fmtMm(h.precip)}</td>
+                {conTormenta && <td class="num">{fmt(h.tormenta, " %")}</td>}
+                <td>
+                  <span class="tabla-horas-viento">
+                    {h.dir != null && (
+                      <svg width="14" height="14" viewBox="-12 -12 24 24" aria-hidden="true" style={`transform:rotate(${Math.round(h.dir)}deg)`}>
+                        <path d="M0 -10V10M-5 4L0 10L5 4" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+                      </svg>
+                    )}
+                    {fmt(h.viento)} {h.dir != null && <abbr title={`Viento del ${rumbo(h.dir)}`}>{rumbo(h.dir)}</abbr>}
+                  </span>
+                </td>
+                <td class:list={["num", { "texto-almagra": (h.racha ?? 0) > RACHA_DESTACADA }]}>{fmt(h.racha)}</td>
+                <td class="num">{fmt(h.hum, " %")}</td>
+                <td class="num">{fmt(h.uv)}</td>
+                <td class="num">{fmt(h.nubes, " %")}</td>
+                <td class="texto-secundario">{h.aemet ? "AEMET" : "Open-Meteo"}</td>
+              </tr>
+            ))}
+          </tbody>
+        ))
+      }
+    </table>
+  </div>
+</details>
+
+<style>
+  .tabla-horas summary {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    text-decoration: underline;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 0.18em;
+  }
+  .tabla-horas summary:hover {
+    color: var(--color-almagra);
+  }
+  .tabla-horas[open] summary {
+    margin-bottom: 12px;
+  }
+  .tabla-horas-scroll {
+    background: var(--color-blanco);
+    border: 1px solid var(--color-linea);
+    border-radius: 4px;
+    padding: 4px 16px 0;
+  }
+  .tabla-horas-tabla {
+    min-width: 1040px;
+    font-size: 15px;
+  }
+  .tabla-horas-tabla :global(tbody th),
+  .tabla-horas-tabla :global(tbody td) {
+    padding-block: 8px;
+    white-space: nowrap;
+  }
+  .tabla-horas-tabla :global(thead th) {
+    white-space: nowrap;
+  }
+  .tabla-horas-dia :global(th) {
+    padding-top: 16px;
+    font-size: 17px;
+    font-weight: 800;
+    font-stretch: 62%;
+  }
+  .tabla-horas-cielo,
+  .tabla-horas-viento {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .tabla-horas-viento abbr {
+    text-decoration: none;
+  }
+</style>
