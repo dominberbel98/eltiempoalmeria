@@ -1,4 +1,5 @@
 // Previsión horaria de los 103 municipios (48 h) para el mapa. Un único JSON compartido por todas las páginas.
+// `tormenta` es la probabilidad de tormenta de AEMET (bloques de 6 h) por hora, o null si el municipio no tiene ese dato.
 import { fichas } from "../lib/resumen";
 
 const r0 = (n: number | null) => (n == null ? null : Math.round(n));
@@ -10,6 +11,7 @@ export function GET() {
   const municipios = todas.map(({ municipio: m, prevision: p }) => {
     const porHora = new Map(p.horas.map((h) => [h.t, h]));
     const serie = <T,>(fn: (h: (typeof p.horas)[number]) => T) => horas.map((t) => (porHora.has(t) ? fn(porHora.get(t)!) : null));
+    const tormenta = serie((h) => r0(h.tormenta));
     return {
       id: m.id,
       slug: m.slug,
@@ -23,6 +25,7 @@ export function GET() {
       racha: serie((h) => r0(h.racha)),
       dir: serie((h) => r0(h.dir)),
       cielo: serie((h) => h.cieloTxt),
+      tormenta: tormenta.some((x) => x != null) ? tormenta : null,
     };
   });
   return new Response(JSON.stringify({ horas, municipios }), { headers: { "Content-Type": "application/json" } });
