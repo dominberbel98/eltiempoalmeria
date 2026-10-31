@@ -1,35 +1,68 @@
 ---
-import { MapPin } from "lucide-react";
+// /mapa/: el mapa provincial por horas a pantalla amplia, con la misma lógica que la portada, y la lista de los 103.
 import Base from "../layouts/Base.astro";
+import Buscador from "../components/Buscador";
 import ListaMunicipios from "../components/ListaMunicipios.astro";
-import MapaProvincia from "../components/MapaProvincia";
+import MapaProvincia, { capaPorDefecto, elegirDestacados, redondearCapa } from "../components/MapaProvincia";
+import { getMeta } from "../lib/datos";
 import { fichas } from "../lib/resumen";
 
 const base = import.meta.env.BASE_URL;
+const meta = getMeta();
+const todas = fichas();
+const lista = todas.map(({ municipio: m }) => ({ nombre: m.nombre, slug: m.slug, lat: m.lat, lon: m.lon, altitud: m.altitud }));
+
+const llueve = todas.some((f) => f.prevision.horas.some((h) => (h.precip ?? 0) >= 0.1));
+const capaInicial = capaPorDefecto(llueve);
+const horaInicial = todas.find((f) => f.prevision.horas.length)?.prevision.horas[0]?.t;
+const destacadosIniciales = elegirDestacados(
+  capaInicial,
+  todas.map(({ municipio: m, prevision: p }) => ({
+    slug: m.slug,
+    nombre: m.nombre,
+    valor: redondearCapa(capaInicial, p.horas.find((h) => h.t === horaInicial)?.[capaInicial]),
+  }))
+);
 ---
 
 <Base
-  title="Mapa del tiempo en Almería por horas: lluvia y viento por municipio"
-  description="Mapa de la provincia de Almería con la previsión hora a hora de lluvia, probabilidad de precipitación, viento, rachas y temperatura en cada uno de sus 103 municipios."
+  title="Mapa del tiempo en Almería por horas: lluvia, viento y tormentas por municipio"
+  description="Mapa de la provincia de Almería con la previsión hora a hora de lluvia, probabilidad de precipitación, viento, rachas, temperatura y tormentas en cada uno de sus 103 municipios."
   activo="mapa"
+  ancho="completo"
 >
-  <section class="intro">
-    <div>
-      <div class="eyebrow">LAS PRÓXIMAS 48 HORAS</div>
-      <h1>El mapa, <em>hora a hora.</em></h1>
-      <p>Lluvia y viento en cada término municipal de la provincia.</p>
+  <div slot="buscador"><Buscador client:idle municipios={lista} base={base} /></div>
+
+  <section class="banda-oscura" aria-labelledby="mp-titulo">
+    <div class="contenedor">
+      <MapaProvincia
+        client:visible
+        base={base}
+        version={meta.updatedAt}
+        capaInicial={capaInicial}
+        destacadosIniciales={destacadosIniciales}
+        horaInicial={horaInicial}
+        amplio
+      />
     </div>
   </section>
-  <section id="provincia" class="province-section" aria-label="Mapa por horas" style="border-top:0;padding-top:0">
-    <div class="province-content mapa-grande">
-      <MapaProvincia client:load base={base} />
-      <ListaMunicipios fichas={fichas()} titulo="Toda Almería" />
-    </div>
-    <div class="map-foot">
-      <MapPin size={13} aria-hidden="true" /><span
-        >Cada área es un término municipal (límites IGN). El valor es la previsión para el punto de referencia del municipio; las
-        flechas indican hacia dónde sopla el viento.</span
-      >
-    </div>
-  </section>
+
+  <div class="contenedor pila mapa-lista" id="municipios">
+    <ListaMunicipios fichas={todas} titulo="Los 103 municipios" />
+    <p class="nota">
+      Cada área del mapa es un término municipal (límites del IGN) y su color es la previsión para el punto de referencia del
+      municipio. Las flechas indican hacia dónde sopla el viento. Pulsa un municipio para ver sus zonas.
+    </p>
+  </div>
 </Base>
+
+<style>
+  .mapa-lista {
+    padding-block: 32px 24px;
+  }
+  @media (min-width: 48rem) {
+    .mapa-lista {
+      padding-block: 48px 24px;
+    }
+  }
+</style>

@@ -1,38 +1,128 @@
 ---
-import { ArrowUpRight } from "lucide-react";
+// Lista de municipios con el tiempo de ahora: nombre, altitud (o distancia), cielo, temperatura y máxima/mínima de hoy.
+// En /mapa/ son los 103; en la página de un municipio, los cercanos (con `km`).
 import IconoCielo from "./IconoCielo";
 import type { Ficha } from "../lib/resumen";
 import { fmt } from "../lib/tiempo";
 
-type Props = { fichas: (Ficha & { km?: number })[]; titulo: string; actual?: string };
-const { fichas, titulo, actual } = Astro.props;
+type Props = {
+  fichas: (Ficha & { km?: number })[];
+  titulo: string;
+  // slug del municipio de la página actual (se marca con aria-current)
+  actual?: string;
+  // id del encabezado, por si la sección lo necesita para aria-labelledby
+  id?: string;
+};
+const { fichas, titulo, actual, id = "titulo-lista-municipios" } = Astro.props;
 const base = import.meta.env.BASE_URL;
+const ordenadas = fichas.some((f) => f.km != null) ? fichas : [...fichas].sort((a, b) => a.municipio.nombre.localeCompare(b.municipio.nombre, "es"));
 ---
 
-<div class="place-list">
-  <div class="list-title"><span>{titulo}</span><small>{fichas.length} municipios</small></div>
-  <ul style="list-style:none;margin:0;padding:0">
+<section class="lm" aria-labelledby={id}>
+  <div class="lm-cabecera">
+    <h2 id={id} class="titular titular-2">{titulo}</h2>
+    <p class="nota">Temperatura de ahora y máxima y mínima de hoy.</p>
+  </div>
+  <ul class="lm-lista">
     {
-      fichas.map(({ municipio: m, prevision: p, km }) => (
+      ordenadas.map(({ municipio: m, prevision: p, km }) => (
         <li>
           <a href={`${base}${m.slug}/`} aria-current={m.slug === actual ? "page" : undefined}>
-            <span class="place-icon">
-              {p.actual ? <IconoCielo cielo={p.actual.cielo} noche={p.actual.noche} size={18} /> : null}
+            <span class="lm-icono">{p.actual ? <IconoCielo cielo={p.actual.cielo} noche={p.actual.noche} size={24} /> : null}</span>
+            <span class="lm-nombre">
+              <span class="lm-municipio">{m.nombre}</span>
+              <span class="lm-detalle">
+                {km != null ? `A ${Math.round(km)} km, ${m.altitud.toLocaleString("es-ES")} m` : `${m.altitud.toLocaleString("es-ES")} m`}
+                {p.actual?.cieloTxt ? `, ${p.actual.cieloTxt.toLowerCase()}` : ""}
+              </span>
             </span>
-            <span>
-              {m.nombre}
-              <small>{km != null ? `a ${Math.round(km)} km · ${m.altitud} m` : `${m.altitud} m · ${p.actual?.cieloTxt ?? "sin datos"}`}</small>
+            <span class="lm-temp">
+              <span class="cifra lm-ahora">{fmt(p.actual?.temp, "°")}</span>
+              <span class="lm-extremos">
+                {fmt(p.dias[0]?.max, "°")} / {fmt(p.dias[0]?.min, "°")}
+              </span>
             </span>
-            <span class="place-temp">
-              {fmt(p.actual?.temp, "°")}{" "}
-              <small>
-                {fmt(p.dias[0]?.max, "°")}/{fmt(p.dias[0]?.min, "°")}
-              </small>
-            </span>
-            <ArrowUpRight size={16} aria-hidden="true" />
           </a>
         </li>
       ))
     }
   </ul>
-</div>
+</section>
+
+<style>
+  .lm {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    min-width: 0;
+  }
+  .lm-cabecera {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 8px 12px;
+  }
+  .lm-cabecera h2,
+  .lm-cabecera p {
+    margin: 0;
+  }
+  .lm-lista {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr));
+    column-gap: 32px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .lm-lista li {
+    border-top: 1px solid var(--color-linea);
+  }
+  .lm-lista a {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 56px;
+    padding: 8px 0;
+    text-decoration: none;
+  }
+  .lm-lista a:hover .lm-municipio {
+    text-decoration: underline;
+  }
+  .lm-lista a[aria-current="page"] {
+    box-shadow: inset 3px 0 0 var(--color-almagra);
+    padding-left: 10px;
+  }
+  .lm-icono {
+    display: inline-flex;
+    width: 24px;
+    flex-shrink: 0;
+  }
+  .lm-nombre {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .lm-municipio {
+    font-weight: 600;
+  }
+  .lm-detalle {
+    font-size: 14px;
+    color: var(--color-ceniza);
+  }
+  .lm-temp {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    flex-shrink: 0;
+  }
+  .lm-ahora {
+    font-size: 24px;
+  }
+  .lm-extremos {
+    font-size: 14px;
+    color: var(--color-ceniza);
+    white-space: nowrap;
+  }
+</style>

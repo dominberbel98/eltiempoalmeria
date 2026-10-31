@@ -1,25 +1,63 @@
 ---
-import { MapPin } from "lucide-react";
+// Portada (Main.dc.html): banda de basalto con el mapa provincial por horas, el tiempo de ahora en la capital,
+// la tabla "Hoy en la provincia" y "Tus municipios".
 import Base from "../layouts/Base.astro";
-import Resumen from "../components/Resumen.astro";
-import Fuentes from "../components/Fuentes.astro";
-import ListaMunicipios from "../components/ListaMunicipios.astro";
 import Buscador from "../components/Buscador";
-import MapaProvincia from "../components/MapaProvincia";
-import { RinconesRapidos } from "../components/Favoritos";
-import { fichas } from "../lib/resumen";
-import { fmt } from "../lib/tiempo";
+import MapaProvincia, { capaPorDefecto, elegirDestacados, redondearCapa } from "../components/MapaProvincia";
+import TusMunicipios from "../components/TusMunicipios";
+import IconoCielo from "../components/IconoCielo";
+import { getMeta } from "../lib/datos";
+import { fichas, sinAemet } from "../lib/resumen";
+import { fmt, rumbo, ZONA } from "../lib/tiempo";
 
 const base = import.meta.env.BASE_URL;
+const meta = getMeta();
 const todas = fichas();
 const capital = todas.find((f) => f.municipio.id === "04013") ?? todas[0];
 const lista = todas.map(({ municipio: m }) => ({ nombre: m.nombre, slug: m.slug, lat: m.lat, lon: m.lon, altitud: m.altitud }));
 
-// Extremos de hoy en la provincia
-const conDatos = todas.filter((f) => f.prevision.dias[0]?.max != null && f.prevision.dias[0]?.min != null);
-const masCalor = [...conDatos].sort((a, b) => b.prevision.dias[0].max! - a.prevision.dias[0].max!)[0];
-const masFrio = [...conDatos].sort((a, b) => a.prevision.dias[0].min! - b.prevision.dias[0].min!)[0];
-const masLluvia = [...conDatos].sort((a, b) => (b.prevision.dias[0].prob ?? 0) - (a.prevision.dias[0].prob ?? 0))[0];
+// Mapa: capa por defecto (lluvia si llueve en algún municipio en las próximas 48 h; si no, rachas) y la lista
+// lateral de la primera hora, para que se vea antes de cargar el JSON y coincida con él.
+const llueve = todas.some((f) => f.prevision.horas.some((h) => (h.precip ?? 0) >= 0.1));
+const capaInicial = capaPorDefecto(llueve);
+const horaInicial = todas.find((f) => f.prevision.horas.length)?.prevision.horas[0]?.t;
+const destacadosIniciales = elegirDestacados(
+  capaInicial,
+  todas.map(({ municipio: m, prevision: p }) => ({
+    slug: m.slug,
+    nombre: m.nombre,
+    valor: redondearCapa(capaInicial, p.horas.find((h) => h.t === horaInicial)?.[capaInicial]),
+  }))
+);
+
+// Ahora en Almería capital
+const ahora = capital.prevision.actual;
+const hoy = capital.prevision.dias[0];
+const horaAhora = ahora?.t.slice(11, 16) ?? "";
+
+// Hoy en la provincia: los municipios más poblados y uno de sierra
+const DESTACADOS = ["almeria", "roquetas-de-mar", "el-ejido", "nijar", "mojacar", "albox", "velez-blanco"];
+const filas = DESTACADOS.map((s) => todas.find((f) => f.municipio.slug === s)).filter((f) => f != null);
+
+// "Predicción AEMET elaborada hoy a las 14:17" (elaborado está en UTC sin Z)
+const diaMadrid = (d: Date) => d.toLocaleDateString("en-CA", { timeZone: ZONA });
+function textoElaborado(elaborado: string | null): string | null {
+  const ms = elaborado ? Date.parse(elaborado + "Z") : NaN;
+  if (Number.isNaN(ms)) return null;
+  const d = new Date(ms);
+  const hora = d.toLocaleTimeString("es-ES", { timeZone: ZONA, hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+  const a = hora.startsWith("01:") ? "a la" : "a las";
+  const cuando = diaMadrid(d) === diaMadrid(new Date()) ? "hoy" : `el ${d.toLocaleDateString("es-ES", { timeZone: ZONA, day: "numeric", month: "long" })}`;
+  return `${cuando} ${a} ${hora}`;
+}
+const elaborado = textoElaborado(capital.prevision.elaborado);
+const conAemet = filas.filter((f) => !sinAemet(f.municipio.id)).length;
+const notaFuente =
+  conAemet === filas.length && elaborado
+    ? `Predicción AEMET elaborada ${elaborado}`
+    : elaborado
+      ? `Datos de Open-Meteo donde falta AEMET, cuya última predicción se elaboró ${elaborado}`
+      : "Datos de Open-Meteo: la predicción de AEMET no está disponible";
 
 const jsonLd = {
   "@context": "https://schema.org",
@@ -33,70 +71,242 @@ const jsonLd = {
 
 <Base
   title="El tiempo en Almería por horas: previsión para los 103 municipios"
-  description="Previsión del tiempo en la provincia de Almería: mapa de temperaturas y previsión por horas y a 7 días para sus 103 municipios, con datos de AEMET y Open-Meteo."
+  description="Previsión del tiempo en la provincia de Almería: mapa por horas de lluvia, viento, rachas, temperatura y tormentas, y previsión por horas y a 7 días para sus 103 municipios, con datos de AEMET y Open-Meteo."
   jsonLd={jsonLd}
   activo="prevision"
+  ancho="completo"
 >
-  <section class="intro">
-    <div>
-      <div class="eyebrow">DEL MEDITERRÁNEO A LA SIERRA</div>
-      <h1>El tiempo, <em>de allí.</em></h1>
-      <p>Una provincia, 103 municipios. Mil formas de mirar al cielo.</p>
+  <div slot="buscador"><Buscador client:idle municipios={lista} base={base} /></div>
+
+  <section class="banda-oscura" aria-labelledby="mp-titulo">
+    <div class="contenedor">
+      <MapaProvincia
+        client:visible
+        base={base}
+        version={meta.updatedAt}
+        capaInicial={capaInicial}
+        destacadosIniciales={destacadosIniciales}
+        horaInicial={horaInicial}
+      />
     </div>
-    <Buscador client:idle municipios={lista} base={base} />
   </section>
 
-  <RinconesRapidos
-    client:idle
-    base={base}
-    municipios={lista.map(({ nombre, slug }) => ({ nombre, slug }))}
-    porDefecto={["almeria", "roquetas-de-mar", "el-ejido", "nijar", "mojacar", "velez-blanco"]}
-  />
+  <div class="contenedor pila portada">
+    {
+      ahora && (
+        <section aria-labelledby="titulo-ahora" class="ahora">
+          <div class="ahora-principal">
+            <h2 id="titulo-ahora" class="ahora-titulo">
+              Ahora en Almería capital, {horaAhora}
+            </h2>
+            <div class="ahora-cifra">
+              <span class="cifra-gigante">{fmt(ahora.temp, "°")}</span>
+              <div class="ahora-cielo">
+                <span class="ahora-cielo-txt">
+                  <IconoCielo cielo={ahora.cielo} noche={ahora.noche} size={28} />
+                  {ahora.cieloTxt}
+                </span>
+                {hoy && (
+                  <span class="texto-secundario">
+                    Máxima {fmt(hoy.max, "°")}, mínima {fmt(hoy.min, "°")}
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+          <dl class="datos-clave ahora-datos">
+            <div>
+              <dt>Viento</dt>
+              <dd>{ahora.viento == null ? "—" : `${fmt(ahora.viento)} km/h ${ahora.dir == null ? "" : rumbo(ahora.dir)}`}</dd>
+            </div>
+            <div>
+              <dt>Rachas</dt>
+              <dd class="texto-almagra">{fmt(ahora.racha, " km/h")}</dd>
+            </div>
+            <div>
+              <dt>Humedad</dt>
+              <dd>{fmt(ahora.hum, " %")}</dd>
+            </div>
+            <div>
+              <dt>Lluvia hoy</dt>
+              <dd class="texto-lluvia">{fmt(hoy?.prob, " %")}</dd>
+            </div>
+          </dl>
+          <a class="boton ahora-enlace" href={`${base}${capital.municipio.slug}/`}>Ver {capital.municipio.nombre} hora a hora</a>
+        </section>
+      )
+    }
 
-  <Resumen municipio={capital.municipio} prevision={capital.prevision} enlace={`${base}${capital.municipio.slug}/`} />
+    <section aria-labelledby="titulo-provincia">
+      <div class="provincia-cabecera">
+        <h2 id="titulo-provincia" class="titular titular-2">Hoy en la provincia</h2>
+        <p class="nota">{notaFuente}</p>
+      </div>
+      <div class="tabla-desplazable">
+        <table class="tabla tabla-provincia">
+          <thead>
+            <tr>
+              <th scope="col">Municipio</th>
+              <th scope="col">Altitud</th>
+              <th scope="col">Ahora</th>
+              <th scope="col">Máx / mín</th>
+              <th scope="col">Cielo</th>
+              <th scope="col" class="num">Viento</th>
+            </tr>
+          </thead>
+          <tbody>
+            {
+              filas.map(({ municipio: m, prevision: p }) => (
+                <tr>
+                  <th scope="row">
+                    <a href={`${base}${m.slug}/`}>{m.nombre}</a>
+                  </th>
+                  <td class="texto-secundario">{m.altitud.toLocaleString("es-ES")} m</td>
+                  <td class="cifra provincia-ahora">{fmt(p.actual?.temp, "°")}</td>
+                  <td>
+                    {fmt(p.dias[0]?.max, "°")} / {fmt(p.dias[0]?.min, "°")}
+                  </td>
+                  <td>{p.actual?.cieloTxt ?? "—"}</td>
+                  <td class="num">{fmt(p.actual?.viento, " km/h")}</td>
+                </tr>
+              ))
+            }
+          </tbody>
+        </table>
+      </div>
+      <a class="enlace-fuerte provincia-todos" href={`${base}mapa/#municipios`}>Ver los 103 municipios</a>
+    </section>
 
-  {
-    masCalor && masFrio && masLluvia && (
-      <section class="hourly card" aria-labelledby="titulo-extremos" style="min-height:0">
-        <div class="eyebrow">HOY EN LA PROVINCIA</div>
-        <h2 id="titulo-extremos" class="sr-only">Extremos de hoy</h2>
-        <div class="condition-grid" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">
-          <article style="padding-left:0">
-            <h3>Máxima más alta</h3>
-            <strong>{fmt(masCalor.prevision.dias[0].max, "°")}</strong>
-            <p><a href={`${base}${masCalor.municipio.slug}/`} style="text-decoration:underline">{masCalor.municipio.nombre}</a></p>
-          </article>
-          <article style="padding-left:0">
-            <h3>Mínima más baja</h3>
-            <strong>{fmt(masFrio.prevision.dias[0].min, "°")}</strong>
-            <p><a href={`${base}${masFrio.municipio.slug}/`} style="text-decoration:underline">{masFrio.municipio.nombre}</a></p>
-          </article>
-          <article style="padding-left:0">
-            <h3>Más probabilidad de lluvia</h3>
-            <strong>{fmt(masLluvia.prevision.dias[0].prob, "%")}</strong>
-            <p><a href={`${base}${masLluvia.municipio.slug}/`} style="text-decoration:underline">{masLluvia.municipio.nombre}</a></p>
-          </article>
-        </div>
-      </section>
-    )
+    <section aria-labelledby="titulo-tus" class="panel-suave tus">
+      <h2 id="titulo-tus" class="titular titular-4 tus-titulo">Tus municipios</h2>
+      <TusMunicipios
+        client:visible
+        base={base}
+        municipios={todas.map(({ municipio: m, prevision: p }) => ({ slug: m.slug, nombre: m.nombre, temp: p.actual?.temp ?? null }))}
+      />
+    </section>
+  </div>
+</Base>
+
+<style>
+  .portada {
+    padding-block: 32px 24px;
+  }
+  @media (min-width: 48rem) {
+    .portada {
+      padding-block: 48px 24px;
+      gap: 56px;
+    }
   }
 
-  <section id="provincia" class="province-section" aria-labelledby="titulo-provincia" style="margin-top:40px">
-    <div class="section-top">
-      <div>
-        <div class="eyebrow">CADA RINCÓN, SU CIELO</div>
-        <h2 id="titulo-provincia">Explora la provincia</h2>
-        <p class="muted">Lluvia, viento, rachas y temperatura de las próximas 48 horas en cada uno de los 103 municipios. Pasa por encima de un municipio para ver sus datos o pulsa ▶ para ver la evolución.</p>
-      </div>
-    </div>
-    <div class="province-content">
-      <MapaProvincia client:visible base={base} />
-      <ListaMunicipios fichas={todas} titulo="Toda Almería" />
-    </div>
-    <div class="map-foot">
-      <MapPin size={13} aria-hidden="true" /><span>Cada área es un término municipal (límites IGN). El valor es la previsión para el punto de referencia del municipio; las flechas indican hacia dónde sopla el viento.</span>
-    </div>
-  </section>
+  /* Ahora en Almería capital */
+  .ahora {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 24px 32px;
+    padding-bottom: 32px;
+    border-bottom: 1px solid var(--color-linea);
+  }
+  .ahora-principal {
+    flex: 1 1 360px;
+    min-width: 0;
+  }
+  .ahora-titulo {
+    margin: 0 0 8px;
+    font-size: 18px;
+    font-weight: 600;
+  }
+  .ahora-cifra {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+  }
+  .ahora-cielo {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 18px;
+  }
+  .ahora-cielo-txt {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .ahora-datos {
+    flex: 2 1 520px;
+    margin: 0;
+  }
+  .ahora-datos dd {
+    font-size: 28px;
+  }
+  .ahora-enlace {
+    flex: 0 0 auto;
+  }
+  @media (min-width: 48rem) {
+    .ahora {
+      padding-bottom: 40px;
+    }
+    .ahora-datos {
+      border-top: 0;
+      padding-top: 0;
+      gap: 16px;
+    }
+    .ahora-datos dt {
+      font-size: 15px;
+    }
+  }
 
-  <Fuentes />
-</Base>
+  /* Hoy en la provincia */
+  .provincia-cabecera {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 8px 12px;
+    margin-bottom: 16px;
+  }
+  .provincia-cabecera h2,
+  .provincia-cabecera p {
+    margin: 0;
+  }
+  .tabla-provincia {
+    min-width: 640px;
+  }
+  .tabla-provincia tbody th a {
+    font-weight: 600;
+  }
+  .provincia-ahora {
+    font-size: 22px;
+  }
+  .provincia-todos {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    margin-top: 8px;
+  }
+
+  /* Tus municipios */
+  .tus {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 16px 24px;
+  }
+  .tus-titulo {
+    margin: 0;
+    flex: 0 0 auto;
+  }
+  .tus :global(.tus-texto) {
+    margin: 0;
+    flex: 1 1 300px;
+  }
+  .tus :global(.tus-lista) {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+</style>

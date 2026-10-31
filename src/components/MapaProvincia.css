@@ -1,0 +1,363 @@
+/* Mapa provincial (MapaProvincia.tsx). Pensado para ir dentro de una .banda-oscura (fondo basalto). Prefijo mp-. */
+.mp {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 32px 40px;
+}
+.mp-principal {
+  flex: 999 1 640px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.mp-controles {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.mp-lateral {
+  flex: 1 1 300px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+@media (min-width: 48rem) {
+  .mp-lateral {
+    padding-top: 8px;
+  }
+}
+
+/* Título y entradilla */
+.mp-cabecera {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px 16px;
+}
+.mp-titulo {
+  margin: 0;
+  max-width: 13ch;
+}
+.mp-titulo:focus {
+  outline: none;
+}
+.mp-titulo:focus-visible {
+  outline: 3px solid var(--color-almagra-claro);
+  outline-offset: 4px;
+}
+.mp-intro {
+  margin: 0;
+  max-width: 34ch;
+  font-size: 16px;
+  line-height: 1.45;
+  color: var(--color-suave-oscuro);
+}
+
+/* Mapa */
+.mp-marco {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.mp-lienzo {
+  height: clamp(340px, 92vw, 620px);
+  border-radius: 4px;
+  overflow: hidden;
+  background: #15343a; /* mar */
+}
+@media (min-width: 48rem) {
+  .mp-amplio .mp-lienzo {
+    height: clamp(420px, calc(100vh - 230px), 900px);
+  }
+}
+.mp .leaflet-container {
+  background: #15343a;
+  font-family: inherit;
+  font-size: 14px;
+}
+.mp .leaflet-control-attribution {
+  background: rgb(30 42 48 / 0.85);
+  color: var(--color-suave-oscuro);
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 0 6px;
+}
+.mp .leaflet-control-attribution a {
+  color: var(--color-texto-oscuro);
+}
+.mp .leaflet-bar {
+  border: 1px solid var(--color-borde-oscuro);
+  border-radius: 4px;
+  box-shadow: none;
+}
+.mp .leaflet-bar a {
+  width: 44px;
+  height: 44px;
+  line-height: 44px;
+  font-size: 22px;
+  background: var(--color-basalto);
+  color: var(--color-cal);
+  border-bottom-color: var(--color-borde-oscuro);
+}
+.mp .leaflet-bar a:hover,
+.mp .leaflet-bar a:focus-visible {
+  background: var(--color-basalto-2);
+  color: var(--color-cal);
+}
+.mp .leaflet-interactive:focus {
+  outline: none;
+}
+.mp-tip.leaflet-tooltip {
+  background: var(--color-basalto);
+  color: var(--color-cal);
+  border: 1px solid var(--color-borde-oscuro);
+  border-radius: 4px;
+  box-shadow: none;
+  font-size: 14px;
+  padding: 4px 8px;
+}
+.mp-tip.leaflet-tooltip-top::before {
+  border-top-color: var(--color-basalto);
+}
+.mp-tip strong {
+  font-weight: 700;
+}
+.mp-flecha {
+  pointer-events: none;
+}
+.mp-flecha svg {
+  position: absolute;
+  overflow: visible;
+}
+
+/* Leyenda: sobre el mapa en escritorio, debajo en móvil */
+.mp-leyenda-caja {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px 16px;
+}
+.mp-leyenda-titulo {
+  margin: 0;
+  font-size: 13px;
+  color: var(--color-suave-oscuro);
+}
+.mp-leyenda-caja .leyenda {
+  flex: 1 1 100%;
+}
+.mp-leyenda-caja .leyenda > div {
+  flex: 1 1 0;
+}
+.mp-leyenda-caja .leyenda .muestra {
+  width: auto;
+}
+.mp-sin-dato {
+  outline: 1px dashed var(--color-suave-oscuro);
+  outline-offset: -1px;
+}
+@media (min-width: 48rem) {
+  .mp-leyenda-caja {
+    position: absolute;
+    left: 16px;
+    bottom: 16px;
+    z-index: 500;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+    padding: 10px 12px;
+    border-radius: 4px;
+    background: var(--color-basalto);
+  }
+  .mp-leyenda-caja .leyenda {
+    flex: 0 0 auto;
+  }
+  .mp-leyenda-caja .leyenda .muestra {
+    width: 44px;
+  }
+}
+
+/* Mensajes sobre el mapa */
+.mp-mensaje {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  right: 12px;
+  z-index: 500;
+  width: fit-content;
+  max-width: calc(100% - 24px);
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: 4px;
+  background: var(--color-basalto);
+  color: var(--color-cal);
+  font-size: 15px;
+}
+
+/* Reproducción y hora */
+.mp-reproductor {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 16px;
+}
+.mp-hora {
+  min-width: 9ch;
+  font-size: 28px;
+  font-weight: 700;
+  font-stretch: 62%;
+  line-height: 1;
+  text-align: right;
+}
+
+/* Tabla alternativa al mapa */
+.mp-tabla > summary {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+}
+.mp-tabla > summary:hover {
+  color: var(--color-almagra-claro);
+}
+.mp-tabla[open] > summary {
+  margin-bottom: 8px;
+}
+.mp-tabla .tabla {
+  font-size: 15px;
+}
+.mp-tabla .tabla tbody th,
+.mp-tabla .tabla tbody td {
+  padding-block: 6px;
+}
+.mp-tabla .tabla a {
+  font-weight: 600;
+}
+.mp-tabla caption {
+  padding-bottom: 8px;
+  font-size: 14px;
+  color: var(--color-suave-oscuro);
+}
+.mp-boton-zonas {
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--color-borde-oscuro);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-cal);
+  font-size: 14px;
+  white-space: nowrap;
+}
+.mp-boton-zonas:hover {
+  border-color: var(--color-suave-oscuro);
+}
+
+/* Lista lateral de valores más altos */
+.mp-destacados {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.mp-etiqueta {
+  margin: 0;
+  font-size: 15px;
+  color: var(--color-suave-oscuro);
+}
+.mp-destacados ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+}
+.mp-destacados li {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  min-height: 52px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--color-linea-oscura);
+}
+.mp-destacados a {
+  color: var(--color-cal);
+  font-size: 18px;
+}
+.mp-valor {
+  font-size: 26px;
+  font-weight: 700;
+  font-stretch: 62%;
+  line-height: 1;
+  white-space: nowrap;
+  color: var(--color-almagra-claro);
+}
+.mp-valor-lluvia {
+  color: var(--color-lluvia-5);
+}
+.mp-vacio {
+  margin: 0;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--color-linea-oscura);
+  color: var(--color-texto-oscuro);
+}
+
+/* Panel del municipio bajo el cursor */
+.mp-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.mp-panel-nombre {
+  margin: 0;
+  font-size: 34px;
+  font-weight: 800;
+  font-stretch: 62%;
+  line-height: 1;
+}
+.mp-panel dl {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 16px;
+  font-size: 15px;
+}
+.mp-panel dt {
+  color: var(--color-suave-oscuro);
+}
+.mp-panel dd {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+/* Modo foco */
+.mp-foco {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+.mp-foco-acciones {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 24px;
+}
+.mp-foco-acciones a {
+  color: var(--color-cal);
+  font-weight: 600;
+}
+.mp-cargando {
+  margin: 0;
+  min-height: 320px;
+  padding: 20px;
+  border-radius: 4px;
+  background: var(--color-basalto-2);
+  color: var(--color-texto-oscuro);
+}
