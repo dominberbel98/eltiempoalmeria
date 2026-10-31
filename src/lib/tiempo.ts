@@ -219,7 +219,7 @@ export function construirPrevision(d: DatosMunicipio, ahora = horaLocal()): Prev
     const [cieloOm, txtOm] = cieloWmo(om?.daily.weather_code[i]);
     const a = aemetD.get(fecha);
     const periodo = (lista: AemetPeriodo[] | undefined) =>
-      lista?.find((x) => x.periodo === "00-24" && x.value !== "") ?? lista?.find((x) => x.value !== "" && x.value != null);
+      lista?.find((x) => x.periodo === "00-24" && x.value !== "" && x.value != null) ?? lista?.find((x) => x.value !== "" && x.value != null);
     const cieloA = periodo(a?.estadoCielo);
     const cieloCod = cieloA ? cieloAemet(String(cieloA.value)) : null;
     const probA = periodo(a?.probPrecipitacion);

@@ -11,7 +11,9 @@
     "dev": "astro dev",
     "fetch:data": "node --env-file-if-exists=.env --import tsx scripts/fetch-weather.ts",
     "build": "astro check && astro build",
-    "preview": "astro preview"
+    "preview": "astro preview",
+    "generar:nucleos": "tsx scripts/generar-nucleos.ts",
+    "generar:zonas": "tsx scripts/generar-zonas.ts"
   },
   "dependencies": {
     "@astrojs/react": "^7.1.1",

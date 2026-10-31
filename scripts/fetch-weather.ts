@@ -155,9 +155,26 @@ async function main() {
     if (!conAemet && !d.openMeteo) sinPrevision++;
   }
 
-  // updatedAt = hora del dato más reciente descargado de cualquier fuente
-  const tiempos = Object.values(meta.fuentes)
-    .map((f) => msIso((f as { actualizado?: string | null })?.actualizado))
+  // public/radar/ debe coincidir con src/data/radar/ (restaurado de la caché) aunque el radar no se haya ejecutado
+  const archivoRadar = path.join(DIR_FUENTES, "radar.ts");
+  if (existsSync(archivoRadar)) {
+    try {
+      const { sincronizarPublico } = (await import(pathToFileURL(archivoRadar).href)) as {
+        sincronizarPublico?: (dirDatos: string, dirRaiz: string, log?: (m: string) => void) => Promise<void>;
+      };
+      if (typeof sincronizarPublico === "function") await sincronizarPublico(DIR_DATOS, DIR_RAIZ, ctx.log);
+    } catch (e) {
+      console.warn(`[radar] no se pudo sincronizar public/radar: ${mensajeError(e)}`);
+    }
+  }
+
+  // updatedAt = hora del dato más reciente descargado de cualquier fuente. Del radar cuenta la hora de su
+  // última imagen (AEMET puede servir imágenes antiguas), no la de la descarga.
+  const tiempos = Object.entries(meta.fuentes)
+    .map(([clave, f]) => {
+      const fuente = f as { actualizado?: string | null; ultimaImagen?: string | null } | null;
+      return msIso(clave === "radar" ? fuente?.ultimaImagen : fuente?.actualizado);
+    })
     .filter(Number.isFinite);
   if (tiempos.length) meta.updatedAt = new Date(Math.max(...tiempos)).toISOString();
   await escribirJson(path.join(DIR_DATOS, "meta.json"), meta);

@@ -5,11 +5,22 @@ import path from "node:path";
 const DIR = path.resolve("src/data");
 
 export type Municipio = { id: string; nombre: string; slug: string; lat: number; lon: number; altitud: number };
-export type Meta = { updatedAt: string; fallosAemet: string[] };
+// Estado de cada fuente en meta.json (lo escribe scripts/fetch-weather.ts). Los módulos pueden añadir campos internos.
+export type FuentesMeta = {
+  aemet: { actualizado: string | null; elaborado: string | null /*UTC sin Z, tal cual AEMET*/; modo: "todos" | "municipio" | "cache"; atom: { etag: string | null; lastModified: string | null } };
+  openMeteo: { actualizado: string | null; peso: number };
+  zonas: { actualizado: string | null; pasada: string | null /*init ICON-EU ISO*/; peso: number };
+  observaciones: { actualizado: string | null };
+  radar: { actualizado: string | null; comprobado?: string | null; ultimaImagen?: string | null };
+  ria: { actualizado: string | null; ultimoDia: string | null };
+};
+export type Meta = { updatedAt: string; fallosAemet: string[]; fuentes: Partial<FuentesMeta> };
 
 // Formas mínimas de las respuestas que usamos. AEMET mezcla números y cadenas, por eso los valores son string | number.
 type Valor = string | number;
-export type AemetPeriodo = { value?: Valor; periodo?: string; descripcion?: string };
+// En los datos adaptados del tar `todos`, un número ausente llega como null (no como el 0 falso de AEMET).
+export type AemetPeriodo = { value?: Valor | null; periodo?: string; descripcion?: string };
+export type AemetViento = { direccion?: string[]; velocidad?: Valor[]; value?: Valor | null; periodo?: string };
 export type AemetDiaria = {
   elaborado?: string;
   prediccion?: {
@@ -34,6 +45,11 @@ export type AemetHoraria = {
       temperatura?: AemetPeriodo[];
       sensTermica?: AemetPeriodo[];
       humedadRelativa?: AemetPeriodo[];
+      probPrecipitacion?: AemetPeriodo[];
+      probTormenta?: AemetPeriodo[];
+      probNieve?: AemetPeriodo[];
+      nieve?: AemetPeriodo[];
+      vientoAndRachaMax?: AemetViento[];
     }[];
   };
 };
@@ -82,7 +98,8 @@ function leer<T>(archivo: string, siFalta: T): T {
 }
 
 export function getMeta(): Meta {
-  return leer<Meta>("meta.json", { updatedAt: "", fallosAemet: [] });
+  const m = leer<Partial<Meta>>("meta.json", {});
+  return { updatedAt: m.updatedAt ?? "", fallosAemet: m.fallosAemet ?? [], fuentes: m.fuentes ?? {} };
 }
 
 export function getMunicipios(): Municipio[] {
