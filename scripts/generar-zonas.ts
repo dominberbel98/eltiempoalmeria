@@ -179,6 +179,39 @@ function textoAltitud(m: number): string {
   return `${s} m`;
 }
 
+/** Altitud de un nombre de zona de terreno: "Sierra al norte (1.150 m)" => 1150 (null si no lleva). */
+const altitudDelNombre = (nombre: string) => {
+  const m = /\(([\d.]+) m\)$/.exec(nombre);
+  return m ? Number(m[1].replace(/\./g, "")) : null;
+};
+
+/**
+ * Nombres de terreno que se confunden dentro del municipio: el mismo nombre ("Interior al noroeste (1.100 m)") o el
+ * mismo rumbo con altitudes a ≤100 m ("Sierra al noroeste (1.700 m)" y "(1.650 m)"). A todas las zonas de ese rumbo se
+ * les añade la distancia a la capital dentro del paréntesis: "Interior al noroeste (a 14 km, 1.100 m)". Va dentro del
+ * paréntesis para que en las frases ("irá de 5 °C en el interior al noroeste (a 14 km, 1.100 m) a 9 °C en María")
+ * no se lea como otra cifra.
+ */
+function desambiguarNombres(zonas: { nombre: string; tipo: string; lat: number; lon: number }[], capital: { lat: number; lon: number }): void {
+  const base = (n: string) => n.replace(/\s*\([^)]*\)\s*$/, "").replace(/, a \d+ km$/, "");
+  const grupos = new Map<string, typeof zonas>();
+  for (const z of zonas) {
+    if (z.tipo !== "terreno") continue;
+    const b = base(z.nombre);
+    grupos.set(b, [...(grupos.get(b) ?? []), z]);
+  }
+  for (const [b, grupo] of grupos) {
+    if (grupo.length < 2) continue;
+    const alt = grupo.map((z) => altitudDelNombre(z.nombre));
+    const confusos = grupo.some((_, i) => grupo.some((__, j) => j > i && (alt[i] == null || alt[j] == null || Math.abs(alt[i]! - alt[j]!) <= 100)));
+    if (!confusos) continue;
+    for (const [i, z] of grupo.entries()) {
+      const km = Math.round(rumboYDistancia(capital, z).km);
+      z.nombre = alt[i] == null ? `${b} (a ${km} km)` : `${b} (a ${km} km, ${textoAltitud(alt[i]!)})`;
+    }
+  }
+}
+
 // ---------- Programa ----------
 
 async function main() {
@@ -351,13 +384,7 @@ async function main() {
         costa: g.costa,
       });
     });
-    // Nombres repetidos dentro del municipio: se añade la distancia a la capital (calculado antes de renombrar)
-    const repetidos = new Set(elegidas.filter((z) => elegidas.filter((x) => x.nombre === z.nombre).length > 1).map((z) => z.id));
-    for (const z of elegidas) {
-      if (!repetidos.has(z.id) || z.tipo !== "terreno") continue;
-      const { km } = rumboYDistancia(capital, z);
-      z.nombre = z.nombre.replace(/^(.*? al [a-z]+)/, `$1, a ${Math.round(km)} km`);
-    }
+    desambiguarNombres(elegidas, capital);
     // Núcleos del buscador: el de la propia zona; si no, la zona de su celda (la de altitud más parecida); si no, Voronoi
     const k = t ? escalaLon(t) : Math.cos((m.lat * Math.PI) / 180);
     for (const n of propios) {

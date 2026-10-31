@@ -304,6 +304,10 @@
   }
   .migas a {
     color: inherit;
+    /* objetivo táctil de 44 px sin cambiar la línea */
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
   }
   .enlace-fuerte {
     font-weight: 600;
@@ -541,6 +545,11 @@
   .fila-destacada {
     background: var(--color-almagra-fondo);
   }
+  /* Sobre almagra-fondo, el almagra se queda en 4,43:1: el texto destacado pasa a almagra oscuro (6,72:1) */
+  .tabla tr.destacada .texto-almagra,
+  .fila-destacada .texto-almagra {
+    color: var(--color-almagra-oscuro);
+  }
   .tabla tr.lluviosa,
   .fila-lluviosa {
     background: var(--color-mar-fondo);
@@ -672,7 +681,7 @@
     }
     .logo {
       font-size: 30px;
-      padding-block: 0;
+      padding-block: 7px; /* 44 px de alto */
     }
     .cabecera-botones {
       display: none;
@@ -684,7 +693,7 @@
       padding-top: 0;
     }
     .nav-principal a {
-      min-height: 0;
+      min-height: 44px;
       padding: 10px 0 4px;
       border-top: 0;
       border-left: 0;

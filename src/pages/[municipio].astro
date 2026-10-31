@@ -9,6 +9,9 @@ import TablaHoras from "../components/TablaHoras.astro";
 import Fuentes from "../components/Fuentes.astro";
 import Meteograma from "../components/Meteograma";
 import VistaZonas from "../components/VistaZonas";
+// Estilos de la vista por zonas (la isla no los importa: ver VistaZonas.tsx)
+import "leaflet/dist/leaflet.css";
+import "../components/mapa/mapa.css";
 import Buscador from "../components/Buscador";
 import { getMeta } from "../lib/datos";
 import { cercanos, fichas, sinAemet, type Ficha } from "../lib/resumen";

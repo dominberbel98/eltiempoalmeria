@@ -257,3 +257,94 @@
   gap: 12px;
   scroll-margin-top: 16px;
 }
+
+/* ---------- Núcleo buscado que en el mapa cae en la celda de otra zona (?nucleo=) ---------- */
+.mz-nucleo {
+  position: absolute;
+  left: -7px;
+  top: -7px;
+  width: 14px;
+  height: 14px;
+  transform: rotate(45deg);
+  background: var(--color-almagra-claro);
+  border: 2px solid var(--color-basalto);
+}
+.mz-et-nucleo {
+  margin-top: 4px;
+  background: var(--color-almagra-claro);
+  color: var(--color-basalto);
+  font-weight: 700;
+}
+.vz-nota-nucleo {
+  color: var(--color-texto-oscuro);
+}
+
+/* ---------- Modo foco (compacto): valores de todas las zonas en lista visible ---------- */
+.vz-lista-valores {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr));
+  gap: 0 24px;
+  font-size: 15px;
+}
+.vz-lista-valores li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--color-linea-oscura);
+  color: var(--color-texto-oscuro);
+}
+.vz-lista-valores strong {
+  color: var(--color-cal);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ---------- Tabla por horas de una zona (plegada bajo su meteograma) ---------- */
+.tabla-horas-zona summary {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.18em;
+}
+.tabla-horas-zona summary:hover {
+  color: var(--color-almagra);
+}
+.tabla-horas-zona[open] summary {
+  margin-bottom: 12px;
+}
+.tabla-horas-zona-scroll {
+  background: var(--color-blanco);
+  border: 1px solid var(--color-linea);
+  border-radius: 4px;
+  padding: 4px 16px 0;
+}
+.tabla-horas-zona-tabla {
+  min-width: 620px;
+  font-size: 15px;
+}
+.tabla-horas-zona-tabla tbody th,
+.tabla-horas-zona-tabla tbody td,
+.tabla-horas-zona-tabla thead th {
+  padding-block: 8px;
+  white-space: nowrap;
+}
+.tabla-horas-zona-tabla .tabla-horas-dia th {
+  padding-top: 16px;
+  font-size: 17px;
+  font-weight: 800;
+  font-stretch: 62%;
+}
+.tabla-horas-zona-tabla abbr {
+  text-decoration: none;
+}
+/* En la fila elegida (fondo almagra-fondo), el hover en almagra no llega a 4,5:1: almagra oscuro */
+.vz-tabla tr.destacada .vz-zona:hover .vz-zona-nombre {
+  color: var(--color-almagra-oscuro);
+}

@@ -23,7 +23,7 @@ Sitio estático: los datos se descargan en GitHub Actions, se generan las págin
 
 1. **AEMET OpenData**: predicción municipal diaria y horaria, observación de estaciones y radar regional de Almería (Níjar).
    - Cada llamada es en dos pasos: el endpoint devuelve `{ estado, datos }` y hay que pedir la URL de `datos` (caduca a ~5 min).
-   - La predicción se pide para los 103 de una vez: se consulta el ATOM `predesp_mun_opendata_todos_ATOM.xml` (If-None-Match / If-Modified-Since) y, si hay edición nueva, los tar.gz `horaria/todos` y `diaria/todos`. Si fallan, respaldo por municipio en lotes de ≤35.
+   - La predicción se pide para los 103 de una vez: se consulta el ATOM `predesp_mun_opendata_todos_ATOM.xml` (solo If-Modified-Since: el ETag cambia entre servidores) y, si hay edición nueva, los tar.gz `horaria/todos` y `diaria/todos`. Si fallan, respaldo por municipio en lotes de ≤35, que se corta tras 2 fallos seguidos de red, 5xx o 429; el módulo tiene un presupuesto de 6 min para no agotar el timeout del job.
    - Respuestas con UTF-8 y Latin-1 mezclados (`decodificarMixto`). `elaborado` viene en UTC sin "Z": `Date.parse(elaborado + "Z")`.
    - Límite: máximo 40 peticiones/min por usuario, con reintentos ante 429. El cupo se comparte con producción: en local, gastar lo mínimo.
 2. **Open-Meteo**: modelo horario de los 103 municipios (viento, rachas, UV, nubes, prob. precipitación) y zonas de predicción dentro de cada término (ICON-EU, `best_match`, `cell_selection=land`).
@@ -38,8 +38,8 @@ Sitio estático: los datos se descargan en GitHub Actions, se generan las págin
   1. `aemet.ts`: ATOM en cada ejecución; descarga si hay edición nueva, datos de más de 6 h o faltan municipios.
   2. `openmeteo.ts`: TTL 55 min.
   3. `zonas.ts`: cuando hay pasada principal nueva de ICON-EU y han pasado ≥5 h, o si las zonas tienen más de 7 h. Espera 61 s si ya se pidió Open-Meteo en la misma ejecución.
-  4. `observaciones.ts`: TTL 55 min.
-  5. `radar.ts`: en cada ejecución; guarda las 8 últimas imágenes distintas y las copia a `public/radar/` (gitignored).
+  4. `observaciones.ts`: TTL 3 h (aún no la usa ninguna página); filtra con el contorno provincial de `public/provinces.geojson`.
+  5. `radar.ts`: en cada ejecución; guarda las 8 últimas imágenes distintas de las 2 h anteriores a la más reciente y las copia a `public/radar/` (gitignored). Una imagen cuya hora dibujada no se puede fechar no se publica; los dígitos sin plantilla que se identifican se guardan en `src/data/radar/glifos.json`.
   6. `ria.ts`: TTL 3 h (o si falta el día de ayer después de las 08:30 UTC).
 - Un fallo de una fuente nunca rompe el build si hay datos anteriores: se conserva el último dato bueno y se anota en `meta.json`. El orquestador registra el consumo de AEMET y Open-Meteo.
 
@@ -49,7 +49,7 @@ Sitio estático: los datos se descargan en GitHub Actions, se generan las págin
 - Toda la descarga de datos ocurre en `scripts/fetch-weather.ts` y `scripts/fuentes/`. Los componentes y páginas solo leen JSON de `src/data/`.
 - `src/data/` y `public/radar/` están en `.gitignore`.
 - Si falta el dato de AEMET de un municipio, la página usa Open-Meteo y lo indica. Nunca se rompe el build por un municipio.
-- Mostrar siempre la hora de última actualización (`meta.updatedAt`) y avisar si tiene más de 2 h.
+- Mostrar siempre la hora de última actualización (`meta.updatedAt`: el dato de predicción u observación más reciente; la RIA no cuenta) y avisar si tiene más de 2 h.
 - Atribución obligatoria en el pie: "Información elaborada por la Agencia Estatal de Meteorología", "Weather data by Open-Meteo.com (CC BY 4.0)", IGN (CC BY 4.0) e INE; en `/agro/`, la de la RIA; en `/radar/`, "Radar de Almería (Níjar), © AEMET" con enlace al aviso legal.
 - Fechas y horas en zona `Europe/Madrid`, formato español.
 - Copy en español, en frase normal. Prohibido en la interfaz: etiquetas en mayúsculas, cadenas "A · B · C", numeraciones decorativas, "→" en enlaces y emojis.

@@ -282,6 +282,20 @@ export const AEMET_API = "https://opendata.aemet.es/opendata/api";
 export const PAUSA_AEMET_MS = 1_600;
 let ultimaPeticionAemet = 0; // compartida por todos los clientes del proceso
 
+/** Ajustes de reintento para una llamada concreta (p. ej. el respaldo por municipio, más corto). */
+export type OpcionesAemet = Pick<OpcionesPedir, "intentos" | "timeoutMs" | "ante429">;
+
+/**
+ * El fallo es transitorio y de todo el servicio (red, tiempo agotado, 5xx o 429, incluido el {estado: 429} que AEMET
+ * devuelve con HTTP 200): seguir pidiendo en la misma ejecución solo alarga el job.
+ */
+export function esFalloDeServicio(e: unknown): boolean {
+  if (e instanceof ErrorHttp) return e.status === 429 || e.status >= 500;
+  if (!(e instanceof Error)) return false;
+  if (e.name === "TimeoutError" || e.name === "AbortError" || e.name === "TypeError") return true;
+  return /estado (429|5\d\d)\b|fetch failed|ECONN|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|socket/i.test(e.message);
+}
+
 export class ClienteAemet {
   peticiones = 0;
   constructor(
@@ -311,9 +325,9 @@ export class ClienteAemet {
    * Dos pasos: endpoint (con clave) => { estado, datos } => GET datos (la URL caduca a ~5 min).
    * `tipo` valida el Content-Type de los datos. Una URL caducada responde 200 con JSON {estado: 404}.
    */
-  async datos(endpoint: string, tipo: RegExp, timeoutMs = 60_000): Promise<Respuesta> {
+  async datos(endpoint: string, tipo: RegExp, timeoutMs = 60_000, op: OpcionesAemet = {}): Promise<Respuesta> {
     if (!this.key) throw new Error("Falta AEMET_API_KEY");
-    const r1 = await this.pedir(`${AEMET_API}${endpoint}`, { cabeceras: { api_key: this.key }, etiqueta: endpoint });
+    const r1 = await this.pedir(`${AEMET_API}${endpoint}`, { ...op, cabeceras: { api_key: this.key }, etiqueta: endpoint });
     const restantes = r1.headers.get("remaining-request-endpoint");
     let paso1: { estado?: number; datos?: string; descripcion?: string };
     try {
@@ -325,7 +339,7 @@ export class ClienteAemet {
       throw new Error(`AEMET ${endpoint}: estado ${paso1.estado ?? "?"} ${paso1.descripcion ?? ""}`.trim());
     }
     if (restantes != null && Number(restantes) < 5) this.log(`  aviso: AEMET remaining-request-endpoint=${restantes} en ${endpoint}`);
-    const r2 = await this.pedir(paso1.datos, { timeoutMs, etiqueta: `${endpoint} (datos)` });
+    const r2 = await this.pedir(paso1.datos, { ...op, timeoutMs, etiqueta: `${endpoint} (datos)` });
     const ct = r2.headers.get("content-type") ?? "";
     if (!tipo.test(ct)) {
       let detalle = "";
@@ -343,8 +357,8 @@ export class ClienteAemet {
   }
 
   /** Datos JSON (dos pasos). Rechaza los objetos de error {estado, descripcion} que llegan con HTTP 200. */
-  async json<T>(endpoint: string): Promise<T> {
-    const r = await this.datos(endpoint, /json|text\/plain/i);
+  async json<T>(endpoint: string, op: OpcionesAemet = {}): Promise<T> {
+    const r = await this.datos(endpoint, /json|text\/plain/i, op.timeoutMs ?? 60_000, op);
     const datos = JSON.parse(r.texto());
     if (datos && !Array.isArray(datos) && typeof datos === "object" && "estado" in datos && "descripcion" in datos && Object.keys(datos).length <= 3) {
       throw new Error(`AEMET ${endpoint}: estado ${datos.estado} ${datos.descripcion}`);

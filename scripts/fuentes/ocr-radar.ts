@@ -293,10 +293,19 @@ export type LecturaHora = {
   hora: string | null;
   /** Texto leído de la marca de tiempo, con "?" en los glifos desconocidos */
   texto: string;
-  /** exacta: todos los glifos conocidos; coherencia: había glifos desconocidos y solo una hora de la ventana encaja */
+  /**
+   * exacta: todos los glifos conocidos; coherencia: había glifos desconocidos y solo una hora encaja (de la ventana de
+   * descarga o, si ninguna de la ventana encaja, de los últimos días)
+   */
   metodo: "exacta" | "coherencia" | null;
   /** La hora leída es anterior a la ventana de coherencia (imagen atrasada o radar congelado) */
   atrasada: boolean;
+  /**
+   * Solo cuando hora = null: true si la marca se ha leído en parte y hay alguna hora de la ventana de descarga que
+   * encaja (lectura ambigua, pero la imagen es reciente). false si la marca no encaja con la ventana: la imagen no es
+   * reciente y no debe publicarse como tal. null si no se encontró la marca (formato distinto).
+   */
+  reciente: boolean | null;
   motivo?: string;
   /** Glifos nuevos identificados por coherencia (para añadirlos a PLANTILLAS) */
   glifosNuevos: { caracter: string; filas: string[] }[];
@@ -304,6 +313,7 @@ export type LecturaHora = {
 
 export const VENTANA_MIN = 40; // la imagen tiene que ser de entre descarga − 40 min y descarga
 const TOLERANCIA_FUTURO_MIN = 2; // margen por desajuste de reloj
+const DIAS_ATRAS = 7; // si ninguna hora de la ventana encaja, se prueban las de los últimos días (imagen atrasada)
 
 const pad = (n: number, l = 2) => String(n).padStart(l, "0");
 const DIA_MS = 86_400_000;
@@ -351,7 +361,7 @@ function interpretar(dd: string, aaddd: string, hhmmss: string, descarga: Date):
 
 export function leerHoraRadar(gif: Uint8Array, descarga: Date, plantillas: Record<string, string[]> = PLANTILLAS): LecturaHora {
   const { caracterDe, sinPlantilla } = crearLector(plantillas);
-  const base: LecturaHora = { hora: null, texto: "", metodo: null, atrasada: false, glifosNuevos: [] };
+  const base: LecturaHora = { hora: null, texto: "", metodo: null, atrasada: false, reciente: null, glifosNuevos: [] };
   let img: ImagenIndexada;
   try {
     img = decodificarGif(gif);
@@ -375,8 +385,8 @@ export function leerHoraRadar(gif: Uint8Array, descarga: Date, plantillas: Recor
 
   if (!/\?/.test(dd + aaddd + hhmmss)) {
     const t = interpretar(dd, aaddd, hhmmss, descarga);
-    if (!t) return { ...base, texto, motivo: `marca incoherente: ${texto}` };
-    if (t.getTime() > hasta) return { ...base, texto, motivo: `hora leída posterior a la descarga: ${texto}` };
+    if (!t) return { ...base, texto, reciente: false, motivo: `marca incoherente: ${texto}` };
+    if (t.getTime() > hasta) return { ...base, texto, reciente: false, motivo: `hora leída posterior a la descarga: ${texto}` };
     // Lectura exacta anterior a la ventana: la imagen es antigua (radar congelado o sin imágenes nuevas).
     // Se guarda con su hora real para que la página avise de que no es reciente.
     return { ...base, texto, hora: t.toISOString(), metodo: "exacta", atrasada: t.getTime() < desde };
@@ -385,17 +395,34 @@ export function leerHoraRadar(gif: Uint8Array, descarga: Date, plantillas: Recor
   // Hay glifos sin plantilla: se prueban todas las horas en punto de minuto de la ventana y se acepta
   // solo si encaja exactamente una (los glifos conocidos coinciden y los desconocidos son dígitos sin plantilla).
   const leidos = [marca.dd, marca.aaddd, marca.hhmmss].map((gs) => gs.map(caracterDe));
-  const encajan: Date[] = [];
-  for (let ms = Math.ceil(desde / 60_000) * 60_000; ms <= hasta; ms += 60_000) {
-    const t = new Date(ms);
-    const esperada = marcaEsperada(t);
-    const ok = esperada.every((parte, i) =>
-      parte.split("").every((ch, j) => (leidos[i][j] === "?" ? sinPlantilla.includes(ch) : leidos[i][j] === ch))
-    );
-    if (ok) encajan.push(t);
+  const encajanEntre = (ini: number, fin: number): Date[] => {
+    const out: Date[] = [];
+    for (let ms = Math.ceil(ini / 60_000) * 60_000; ms <= fin; ms += 60_000) {
+      const t = new Date(ms);
+      const esperada = marcaEsperada(t);
+      const ok = esperada.every((parte, i) =>
+        parte.split("").every((ch, j) => (leidos[i][j] === "?" ? sinPlantilla.includes(ch) : leidos[i][j] === ch))
+      );
+      if (ok) out.push(t);
+    }
+    return out;
+  };
+  let encajan = encajanEntre(desde, hasta);
+  let atrasada = false;
+  if (encajan.length > 1) {
+    // Varias horas de la ventana: la imagen es reciente, pero no se sabe cuál de ellas
+    return { ...base, texto, reciente: true, motivo: `lectura ambigua (${encajan.length} horas posibles): ${texto}` };
   }
-  if (encajan.length !== 1) {
-    return { ...base, texto, motivo: encajan.length ? `lectura ambigua (${encajan.length} horas posibles): ${texto}` : `ninguna hora de la ventana encaja con ${texto}` };
+  if (!encajan.length) {
+    // Ninguna hora de la ventana: la imagen es antigua (o la lectura es errónea). Se buscan las de los últimos días.
+    encajan = encajanEntre(descarga.getTime() - DIAS_ATRAS * DIA_MS, desde - 60_000);
+    if (encajan.length !== 1) {
+      const motivo = encajan.length
+        ? `imagen atrasada con lectura ambigua (${encajan.length} horas posibles en ${DIAS_ATRAS} días): ${texto}`
+        : `ninguna hora de los últimos ${DIAS_ATRAS} días encaja con ${texto}`;
+      return { ...base, texto, reciente: false, motivo };
+    }
+    atrasada = true;
   }
   const t = encajan[0];
   const esperada = marcaEsperada(t).join("");
@@ -404,5 +431,22 @@ export function leerHoraRadar(gif: Uint8Array, descarga: Date, plantillas: Recor
     .map((g, i) => ({ g, ch: esperada[i] }))
     .filter(({ g }) => caracterDe(g) === "?")
     .map(({ g, ch }) => ({ caracter: ch, filas: g.filas }));
-  return { ...base, texto, hora: t.toISOString(), metodo: "coherencia", glifosNuevos };
+  return { ...base, texto, hora: t.toISOString(), metodo: "coherencia", atrasada, glifosNuevos };
+}
+
+/**
+ * Glifos aprendidos por coherencia en ejecuciones anteriores (src/data/radar/glifos.json) unidos a las plantillas fijas.
+ * Un glifo aprendido solo se usa si es un dígito sin plantilla fija y no coincide con el dibujo de otro carácter.
+ */
+export function plantillasCon(aprendidos: Record<string, unknown> | null | undefined): Record<string, string[]> {
+  const out: Record<string, string[]> = { ...PLANTILLAS };
+  const usados = new Set(Object.values(PLANTILLAS).map(CLAVE));
+  for (const [c, filas] of Object.entries(aprendidos ?? {})) {
+    if (!/^[0-9]$/.test(c) || c in PLANTILLAS) continue;
+    if (!Array.isArray(filas) || filas.length !== ALTO_LETRA || !filas.every((f) => typeof f === "string" && /^[#.]+$/.test(f))) continue;
+    if (usados.has(CLAVE(filas))) continue;
+    out[c] = filas;
+    usados.add(CLAVE(filas));
+  }
+  return out;
 }

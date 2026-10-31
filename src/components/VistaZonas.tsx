@@ -3,8 +3,8 @@
 // el meteograma de la zona elegida. Lee /zonas/{slug}.json (src/pages/zonas/[slug].json.ts).
 // `compacto`: para el modo foco del mapa provincial (sin tabla ni meteograma, con enlace a la página del municipio).
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import "leaflet/dist/leaflet.css";
-import "./mapa/mapa.css";
+// Estilos (leaflet.css y mapa/mapa.css): los importan la página del municipio y MapaProvincia, no esta isla, para que
+// el import dinámico desde MapaProvincia no genere una segunda copia de la misma hoja de estilos.
 import type * as Leaflet from "leaflet";
 import type { FeatureCollection, MultiPolygon } from "geojson";
 import Meteograma from "./Meteograma";
@@ -71,6 +71,8 @@ const RELLENO_ETIQUETA = 16 + 2; // 8 px a cada lado y redondeo
 
 const escaparHtml = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 const diaLargo = (fecha: string) => diaConNumero(fecha).toLowerCase(); // "sábado 31"
+/** "desde las 17:00", "desde la 01:00" (hh = "HH:MM") */
+const desdeLas = (hh: string) => `${hh.startsWith("01") ? "desde la" : "desde las"} ${hh}`;
 const aLas = (t: string) => `${t.slice(11, 13) === "01" ? "a la" : "a las"} ${t.slice(11, 16)}`;
 
 /** Nombre de la zona en minúscula inicial para frases ("la sierra al oeste (1.200 m)"), salvo núcleos. */
@@ -147,10 +149,20 @@ const numerico = (v: Valor) => (typeof v === "number" ? v : typeof v === "string
 
 // ---------- Textos del mapa ----------
 
-function tituloMapa(variable: Variable, porHoras: boolean, fecha: string | undefined, t: string | undefined): string {
+/** "el sábado 31" o, si es hoy y solo cuentan las horas que quedan, "hoy desde las 17:00" */
+function diaEnTexto(fecha: string, desdeHoy: string | null): string {
+  return desdeHoy ? `hoy ${desdeLas(desdeHoy)}` : `el ${diaLargo(fecha)}`;
+}
+
+function tituloMapa(variable: Variable, porHoras: boolean, fecha: string | undefined, t: string | undefined, desdeHoy: string | null = null): string {
   if (porHoras && t) {
     const cuando = `el ${diaLargo(t)} ${aLas(t)}`;
     const nombre = { temp: "Temperatura", min: "Temperatura", max: "Temperatura", racha: "Rachas", lluvia: "Lluvia", tormenta: "Tormentas" }[variable];
+    return `${nombre} ${cuando}`;
+  }
+  if (fecha && desdeHoy) {
+    const cuando = diaEnTexto(fecha, desdeHoy);
+    const nombre = { min: "Mínimas", temp: "Mínimas", max: "Máximas", racha: "Rachas máximas", lluvia: "Lluvia", tormenta: "Tormentas" }[variable];
     return `${nombre} ${cuando}`;
   }
   const del = fecha ? `del ${diaLargo(fecha)}` : "";
@@ -261,11 +273,16 @@ export default function VistaZonas({ slug, base, version, nombre, zonaInicial, c
   const [porHoras, setPorHoras] = useState(false);
   const [hora, setHora] = useState(0);
   const [zonaSel, setZonaSel] = useState<string | null>(null);
+  // Núcleo al que se ha llegado desde el buscador cuando en el mapa cae en la celda de otra zona
+  const [nucleoId, setNucleoId] = useState<string | null>(null);
+  // Cambia cada vez que se crea el mapa de Leaflet (se crea de forma asíncrona)
+  const [mapaListo, setMapaListo] = useState(0);
 
   const caja = useRef<HTMLDivElement>(null);
   const mapa = useRef<Leaflet.Map | null>(null);
   const celdas = useRef(new Map<string, Leaflet.Path>());
   const etiquetas = useRef(new Map<string, Leaflet.Marker>());
+  const marcaNucleo = useRef<Leaflet.Layer | null>(null);
   const recolocar = useRef<() => void>(() => {});
   const pintar = useRef<() => void>(() => {});
   const elegirRef = useRef<(id: string) => void>(() => {});
@@ -296,15 +313,20 @@ export default function VistaZonas({ slug, base, version, nombre, zonaInicial, c
         // La zona pedida: en la página del municipio manda ?zona= de la URL (la página es estática y no la conoce);
         // si no viene, la prop zonaInicial
         let pedida: string | undefined;
+        let nucleo: string | null = null;
         if (!compacto) {
           try {
-            pedida = new URLSearchParams(window.location.search).get("zona") ?? undefined;
+            const q = new URLSearchParams(window.location.search);
+            pedida = q.get("zona") ?? undefined;
+            nucleo = q.get("nucleo");
           } catch {
             pedida = undefined;
           }
         }
         pedida ??= zonaInicial ?? undefined;
-        setZonaSel(zonaPorDefecto(j, pedida));
+        const zonaInicialElegida = zonaPorDefecto(j, pedida);
+        setZonaSel(zonaInicialElegida);
+        setNucleoId((j.nucleos ?? []).some((n) => n.id === nucleo && n.zona === zonaInicialElegida) ? nucleo : null);
         setEstado({ tipo: "listo", datos: j });
       })
       .catch((e: unknown) => {
@@ -328,9 +350,13 @@ export default function VistaZonas({ slug, base, version, nombre, zonaInicial, c
     return m;
   }, [datos, variable, modoHoras, dia, hora]);
   const fecha = datos?.dias[dia];
+  // Hoy resumido solo con las horas que quedan (desde la hora del build): el día elegido es ese
+  const desdeHoyDia = datos?.desdeHoy && dia === 0 ? datos.desdeHoy : null;
   const tHora = datos?.horas[hora];
-  const titulo = datos ? tituloMapa(variable, modoHoras, fecha, tHora) : "";
+  const titulo = datos ? tituloMapa(variable, modoHoras, fecha, tHora, desdeHoyDia) : "";
   const zona = datos?.zonas.find((z) => z.id === zonaSel) ?? null;
+  const nucleo = (nucleoId && datos?.nucleos?.find((n) => n.id === nucleoId && n.zona === zonaSel)) || null;
+  const zonaDelMapa = nucleo ? (datos?.zonas.find((z) => z.id === nucleo.zonaMapa) ?? null) : null;
 
   // ---- Selección de zona (mapa o tabla) ----
   const elegir = useCallback(
@@ -341,6 +367,9 @@ export default function VistaZonas({ slug, base, version, nombre, zonaInicial, c
         const url = new URL(window.location.href);
         url.searchParams.set("vista", "zonas");
         url.searchParams.set("zona", id);
+        // El núcleo buscado solo se marca mientras está elegida su zona
+        const n = url.searchParams.get("nucleo");
+        if (n && !datosRef.current?.nucleos?.some((x) => x.id === n && x.zona === id)) url.searchParams.delete("nucleo");
         window.history.replaceState(window.history.state, "", url);
       } catch {
         /* sin history (vista previa): no pasa nada */
@@ -349,6 +378,8 @@ export default function VistaZonas({ slug, base, version, nombre, zonaInicial, c
     [compacto]
   );
   elegirRef.current = elegir;
+  const datosRef = useRef<EndpointZonas | null>(null);
+  datosRef.current = datos;
 
   // ---- Mapa: se crea una vez por JSON cargado ----
   useEffect(() => {
@@ -396,6 +427,7 @@ export default function VistaZonas({ slug, base, version, nombre, zonaInicial, c
 
       // Punto de cada zona y su etiqueta
       etiquetas.current.clear();
+      marcaNucleo.current = null;
       for (const z of datos.zonas) {
         L.circleMarker([z.lat, z.lon], {
           pane: PANES.puntos,
@@ -426,6 +458,7 @@ export default function VistaZonas({ slug, base, version, nombre, zonaInicial, c
       });
       observador.observe(contenedor);
       pintar.current();
+      setMapaListo((n) => n + 1);
     })();
     return () => {
       cancelado = true;
@@ -501,6 +534,32 @@ export default function VistaZonas({ slug, base, version, nombre, zonaInicial, c
     pintar.current();
   }, [datos, valores, variable, escala, zonaSel]);
 
+  // Punto del núcleo buscado (cuando en el mapa cae en la celda de otra zona)
+  useEffect(() => {
+    let cancelado = false;
+    (async () => {
+      const m = mapa.current;
+      marcaNucleo.current?.remove();
+      marcaNucleo.current = null;
+      if (!m || !nucleo) return;
+      const L = (await import("leaflet")).default;
+      if (cancelado || mapa.current !== m) return;
+      marcaNucleo.current = L.marker([nucleo.lat, nucleo.lon], {
+        pane: PANES.puntos,
+        interactive: false,
+        keyboard: false,
+        icon: L.divIcon({
+          className: "mz-icono",
+          html: `<span class="mz-nucleo" aria-hidden="true"></span><span class="mz-et mz-et-abajo mz-et-nucleo" aria-hidden="true">${escaparHtml(nucleo.nombre)}</span>`,
+          iconSize: [0, 0],
+        }),
+      }).addTo(m);
+    })();
+    return () => {
+      cancelado = true;
+    };
+  }, [nucleo, mapaListo]);
+
   // ---- Controles ----
   const cambiarModo = (horas: boolean) => {
     if (horas === modoHoras || !datos) return;
@@ -550,11 +609,20 @@ export default function VistaZonas({ slug, base, version, nombre, zonaInicial, c
         </h2>
         {datos && hayDias && (
           <div className="chips" role="group" aria-label="Día">
-            {datos.dias.map((f, j) => (
-              <button key={f} type="button" aria-pressed={diaPulsado === j} onClick={() => elegirDia(j)} aria-label={diaConNumero(f)}>
-                {diaConNumero(f, true)}
-              </button>
-            ))}
+            {datos.dias.map((f, j) => {
+              const parcial = j === 0 && datos.desdeHoy ? datos.desdeHoy : null;
+              return (
+                <button
+                  key={f}
+                  type="button"
+                  aria-pressed={diaPulsado === j}
+                  onClick={() => elegirDia(j)}
+                  aria-label={parcial ? `Hoy, ${diaConNumero(f).toLowerCase()}, ${desdeLas(parcial)}` : diaConNumero(f)}
+                >
+                  {parcial ? "Hoy" : diaConNumero(f, true)}
+                </button>
+              );
+            })}
           </div>
         )}
       </div>
@@ -626,6 +694,13 @@ export default function VistaZonas({ slug, base, version, nombre, zonaInicial, c
         {datos && <figcaption className="sr-only">{resumen}</figcaption>}
       </figure>
 
+      {nucleo && zona && zonaDelMapa && (
+        <p className="vz-nota-mapa vz-nota-nucleo m-0">
+          {nucleo.nombre} (el rombo del mapa) usa la previsión de {zona.nombre}: está en la misma celda del modelo, aunque en el mapa queda en
+          la zona de {zonaDelMapa.nombre}, que es el punto de previsión más cercano.
+        </p>
+      )}
+
       {datos && !hayDias && (
         <p className="vz-nota-mapa m-0" role="status">
           Ahora mismo no hay previsión por zonas para {nombre}: el modelo no se ha podido descargar. La previsión del municipio sigue en la vista general.
@@ -665,11 +740,12 @@ export default function VistaZonas({ slug, base, version, nombre, zonaInicial, c
 
       {compacto && (
         <>
-          {datos && (
-            <ul className="sr-only">
+          {datos && hayDias && (
+            // Alternativa al mapa con los mismos datos: en el mapa, algunas etiquetas solo caben con el valor
+            <ul className="vz-lista-valores" aria-label={`${titulo} en ${nombre}, por zonas`}>
               {datos.zonas.map((z) => (
                 <li key={z.id}>
-                  {z.nombre}: {textoValor(valores.get(z.id) ?? null, variable, true)}
+                  <span>{z.nombre}</span> <strong>{textoValor(valores.get(z.id) ?? null, variable, true)}</strong>
                 </li>
               ))}
             </ul>
@@ -695,7 +771,7 @@ export default function VistaZonas({ slug, base, version, nombre, zonaInicial, c
           <div className="vz-lado">
             <h2 id={idTabla} className="titular vz-titulo">
               {datos.zonas.length === 1 ? nombre : `Las ${datos.zonas.length} zonas`}
-              {modoHoras && tHora ? `, el ${diaLargo(tHora)} ${aLas(tHora)}` : fecha ? `, el ${diaLargo(fecha)}` : ""}
+              {modoHoras && tHora ? `, el ${diaLargo(tHora)} ${aLas(tHora)}` : fecha ? `, ${diaEnTexto(fecha, desdeHoyDia)}` : ""}
             </h2>
             {hayDias ? (
               <TablaZonas
@@ -734,6 +810,7 @@ export default function VistaZonas({ slug, base, version, nombre, zonaInicial, c
       {datos && zona && hayHoras && (
         <div id={idMeteo} className="vz-meteograma" tabIndex={-1}>
           <Meteograma key={zona.id} horas={horasMeteograma(datos, zona, inicioHoras)} titulo={`${zona.nombre} hora a hora`} />
+          <TablaHorasZona key={`t${zona.id}`} horas={horasMeteograma(datos, zona, inicioHoras)} zona={zona} />
           <p className="nota m-0">
             {zona.tipo === "capital" ? "Núcleo principal" : zona.tipo === "nucleo" ? "Núcleo de población" : "Zona sin núcleo"}, a {fmtAltitud(zona.altitud)}.
             Previsión de Open-Meteo para este punto; AEMET no da predicción propia por zonas.
@@ -884,6 +961,93 @@ function TablaZonas({ datos, porHoras, dia, hora, valores, zonaSel, onElegir, id
         </tbody>
       </table>
     </div>
+  );
+}
+
+// ---------- Tabla por horas de una zona (alternativa accesible del meteograma, plegada) ----------
+
+const RUMBOS_CORTOS = ["N", "NE", "E", "SE", "S", "SO", "O", "NO"];
+const rumboCorto = (g: number) => RUMBOS_CORTOS[Math.round((((g % 360) + 360) % 360) / 45) % 8];
+const RUMBOS_LARGOS = ["norte", "nordeste", "este", "sureste", "sur", "suroeste", "oeste", "noroeste"];
+const rumboLargo = (g: number) => RUMBOS_LARGOS[Math.round((((g % 360) + 360) % 360) / 45) % 8];
+const RACHA_DESTACADA = 20;
+
+function TablaHorasZona({ horas, zona }: { horas: HoraMeteograma[]; zona: ZonaEndpoint }) {
+  const [abierta, setAbierta] = useState(false);
+  const idTitulo = useId();
+  if (!horas.length) return null;
+  // La tormenta por hora de la zona (código de tiempo del modelo y CAPE), con el mismo índice que horas
+  const desde = zona.horas.temp.length - horas.length;
+  const tormentas = horas.map((_, k) => tormentaHora(zona.horas.wc[desde + k], zona.horas.cape[desde + k], zona.horas.prob[desde + k]));
+  const conTormenta = tormentas.some((t) => t !== "no");
+  const porDia = new Map<string, number[]>();
+  horas.forEach((h, k) => porDia.set(h.t.slice(0, 10), [...(porDia.get(h.t.slice(0, 10)) ?? []), k]));
+  const columnas = conTormenta ? 7 : 6;
+  return (
+    <details className="tabla-horas-zona" onToggle={(e) => setAbierta((e.currentTarget as HTMLDetailsElement).open)}>
+      <summary className="enlace-fuerte">Ver la tabla por horas de {zona.nombre}</summary>
+      {abierta && (
+        <div className="tabla-desplazable tabla-horas-zona-scroll" role="region" aria-labelledby={idTitulo} tabIndex={0}>
+          <table className="tabla tabla-horas-zona-tabla">
+            <caption id={idTitulo} className="sr-only">
+              Previsión por horas en {zona.nombre}
+            </caption>
+            <thead>
+              <tr>
+                <th scope="col">Hora</th>
+                <th scope="col" className="num">
+                  Temperatura
+                </th>
+                <th scope="col" className="num">
+                  Prob. de lluvia
+                </th>
+                <th scope="col" className="num">
+                  Lluvia (mm)
+                </th>
+                <th scope="col">Viento (km/h)</th>
+                <th scope="col" className="num">
+                  Rachas (km/h)
+                </th>
+                {conTormenta && <th scope="col">Tormenta</th>}
+              </tr>
+            </thead>
+            {[...porDia].map(([f, ks]) => (
+              <tbody key={f}>
+                <tr className="tabla-horas-dia">
+                  <th colSpan={columnas} scope="colgroup">
+                    {diaConNumero(f)}
+                  </th>
+                </tr>
+                {ks.map((k) => {
+                  const h = horas[k];
+                  return (
+                    <tr key={h.t} className={(h.precip ?? 0) >= 0.5 ? "lluviosa" : undefined}>
+                      <th scope="row">{h.t.slice(11, 16)}</th>
+                      <td className="num">
+                        <strong>{fmtGrados(h.temp)}</strong>
+                      </td>
+                      <td className="num texto-lluvia">{h.prob == null ? "—" : `${h.prob} %`}</td>
+                      <td className="num">{fmtLluvia(h.precip)}</td>
+                      <td>
+                        {fmtKmh(h.viento, false)}
+                        {h.dir != null && (
+                          <>
+                            {" "}
+                            <abbr title={`Viento del ${rumboLargo(h.dir)}`}>{rumboCorto(h.dir)}</abbr>
+                          </>
+                        )}
+                      </td>
+                      <td className={`num${(h.racha ?? 0) > RACHA_DESTACADA ? " texto-almagra" : ""}`}>{fmtKmh(h.racha, false)}</td>
+                      {conTormenta && <td>{TEXTO_TORMENTA[tormentas[k]]}</td>}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            ))}
+          </table>
+        </div>
+      )}
+    </details>
   );
 }
 

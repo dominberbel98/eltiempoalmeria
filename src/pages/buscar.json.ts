@@ -1,11 +1,12 @@
 // Índice del buscador: los 103 municipios y sus núcleos de población (IGN + INE, ≥10 habitantes).
 // Lo carga Buscador.tsx al enfocar el campo de búsqueda.
 //   n: nombre, m: slug del municipio, z: zona de la vista por zonas (null si no hay vista por zonas),
-//   t: "municipio" | "nucleo", a: alias (entidad singular, urbanizaciones y barrios), p: [lat, lon] para la geolocalización.
+//   t: "municipio" | "nucleo", a: alias (entidad singular, urbanizaciones y barrios), p: [lat, lon] para la geolocalización,
+//   c: codine del núcleo solo si en el mapa por zonas cae en la celda de otra zona (la vista por zonas lo marca).
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { getMunicipios } from "../lib/datos";
-import { indiceNucleos, tieneVistaZonas } from "../lib/zonas";
+import { indiceNucleos, nucleosDesplazados, tieneVistaZonas } from "../lib/zonas";
 
 type Nucleo = {
   id: string;
@@ -25,6 +26,7 @@ export type EntradaBusqueda = {
   t: "municipio" | "nucleo";
   a?: string[];
   p: [number, number];
+  c?: string;
 };
 
 const normalizar = (s: string) =>
@@ -61,8 +63,9 @@ export function GET() {
       continue;
     }
     const z = tieneVistaZonas(m.id) ? (zonaDeNucleo.get(x.id) ?? null) : null;
+    const desplazado = z != null && nucleosDesplazados(m.id).some((d) => d.id === x.id);
     entradasNucleo.push({
-      e: { n: x.nombre, m: m.slug, z, t: "nucleo", ...(alias.length ? { a: alias } : {}), p: [r3(x.lat), r3(x.lon)] },
+      e: { n: x.nombre, m: m.slug, z, t: "nucleo", ...(alias.length ? { a: alias } : {}), p: [r3(x.lat), r3(x.lon)], ...(desplazado ? { c: x.id } : {}) },
       poblacion: x.poblacion ?? 0,
     });
   }

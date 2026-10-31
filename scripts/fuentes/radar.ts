@@ -2,17 +2,22 @@
 // Radar regional de AEMET "am" (Almería-Níjar, código NJR): GIF de 480x530 con la hora UTC dibujada.
 // En cada ejecución: endpoint -> URL de "datos" (caduca a los ~5 min, se pide al momento) -> GIF.
 // Se acepta solo image/gif, se deduplica por sha256, se fecha leyendo la franja inferior (ocr-radar.ts)
-// y se conservan las 8 últimas imágenes distintas en src/data/radar/, copiadas también a public/radar/.
+// y se conservan las 8 últimas imágenes distintas de las 2 últimas horas en src/data/radar/, copiadas también a
+// public/radar/. Una imagen cuya marca de hora no encaja con la descarga ni con los últimos días no se publica.
+// Los glifos de dígitos que se identifican por coherencia se guardan en src/data/radar/glifos.json y se usan como
+// plantillas en las ejecuciones siguientes (así el 7, que aún no tiene plantilla fija, se aprende solo).
 // Nunca lanza: ante cualquier fallo devuelve ok=false y deja las imágenes anteriores como estaban.
 
 import { createHash } from "node:crypto";
 import { copyFile, mkdir, readdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { dimensionesGif, esGif, leerHoraRadar, VENTANA_MIN, type LecturaHora } from "./ocr-radar";
+import { dimensionesGif, esGif, leerHoraRadar, plantillasCon, VENTANA_MIN, type LecturaHora } from "./ocr-radar";
 import type { Ctx, Fuente, ResultadoFuente } from "./tipos";
 
 const ENDPOINT = "https://opendata.aemet.es/opendata/api/red/radar/regional/am";
 const MAX_IMAGENES = 8; // 2 h con la cadencia de 15 min del workflow
+/** Solo se conservan (y se animan) las imágenes de las 2 h anteriores a la más reciente. */
+export const VENTANA_IMAGENES_MIN = 120;
 const TIMEOUT_MS = 20_000;
 const PAUSA_REINTENTO_MS = 5_000;
 const ANCHO = 480;
@@ -58,6 +63,18 @@ const ordenar = (a: ImagenRadar, b: ImagenRadar) =>
 export function horaAproximada(descarga: Date): string {
   const paso = 10 * 60_000;
   return new Date(Math.round((descarga.getTime() - paso) / paso) * paso).toISOString();
+}
+
+/**
+ * Imágenes ordenadas de la más antigua a la más reciente, sin las que son de más de VENTANA_IMAGENES_MIN antes de
+ * la más reciente (una imagen nueva tras horas sin radar no se anima junto a las de antes del corte) y como mucho
+ * MAX_IMAGENES. La usa también src/lib/radar.ts por si en la caché quedan restos antiguos.
+ */
+export function recortarImagenes<T extends Pick<ImagenRadar, "hora" | "descargada">>(imagenes: T[]): T[] {
+  const ms = (i: T) => Date.parse(i.hora ?? i.descargada);
+  const orden = imagenes.filter((i) => Number.isFinite(ms(i))).sort((a, b) => ms(a) - ms(b) || a.descargada.localeCompare(b.descargada));
+  const ultima = orden.length ? ms(orden[orden.length - 1]) : 0;
+  return orden.filter((i) => ultima - ms(i) <= VENTANA_IMAGENES_MIN * 60_000).slice(-MAX_IMAGENES);
 }
 
 /** Hora (ISO UTC) de la imagen más reciente, o null si no hay ninguna. */
@@ -194,10 +211,30 @@ export const actualizar: Fuente = async (ctx: Ctx): Promise<ResultadoFuente> => 
     const dim = dimensionesGif(gif);
     if (dim && (dim.ancho !== ANCHO || dim.alto !== ALTO)) ctx.log(`  radar: el GIF mide ${dim.ancho}x${dim.alto} (se esperaba ${ANCHO}x${ALTO})`);
 
-    const lectura: LecturaHora = leerHoraRadar(gif, descarga);
+    const rutaGlifos = path.join(dir, "glifos.json");
+    const aprendidos = await leerJson<Record<string, string[]>>(rutaGlifos, {});
+    const lectura: LecturaHora = leerHoraRadar(gif, descarga, plantillasCon(aprendidos));
+    for (const g of lectura.glifosNuevos) ctx.log(`  radar: glifo sin plantilla resuelto como "${g.caracter}": ${JSON.stringify(g.filas)}`);
+    const nuevosGlifos = Object.fromEntries(lectura.glifosNuevos.filter((g) => !(g.caracter in aprendidos)).map((g) => [g.caracter, g.filas]));
+    if (Object.keys(nuevosGlifos).length) await escribirAtomico(rutaGlifos, JSON.stringify({ ...aprendidos, ...nuevosGlifos }));
+
+    if (!lectura.hora && lectura.reciente === false) {
+      // La marca de hora se lee, pero no encaja con la descarga ni (de forma única) con los últimos días: es una imagen
+      // antigua sin fecha segura. No se publica como reciente; se conservan las anteriores.
+      ctx.log(`  radar: imagen descartada (${lectura.motivo ?? "sin fecha"})`);
+      await escribirAtomico(rutaJson, JSON.stringify({ ...previo, actualizado: comprobado }));
+      await sincronizarPublico(ctx.dirDatos, ctx.dirRaiz, ctx.log);
+      return {
+        fuente: "radar",
+        ok: true,
+        cambiado: false,
+        nota: `imagen sin fecha fiable descartada: ${lectura.motivo ?? "?"}`,
+        peticionesAemet: cuenta.n,
+        metaFuente: { ...metaPrevia, actualizado: metaPrevia.actualizado ?? null, comprobado, ultimaImagen: ultimaHora(previo) },
+      };
+    }
     const aprox = !lectura.hora;
     const hora = lectura.hora ?? horaAproximada(descarga);
-    for (const g of lectura.glifosNuevos) ctx.log(`  radar: glifo sin plantilla resuelto como "${g.caracter}": ${JSON.stringify(g.filas)}`);
     if (aprox) ctx.log(`  radar: no se pudo leer la hora (${lectura.motivo ?? "?"}); se guarda como aproximada ${hora}`);
     if (lectura.atrasada) ctx.log(`  radar: la imagen es de ${hora}, más de 40 min antes de la descarga (radar sin imágenes nuevas)`);
 
@@ -207,7 +244,7 @@ export const actualizar: Fuente = async (ctx: Ctx): Promise<ResultadoFuente> => 
     if (imagenes.some((i) => i.archivo === archivo)) archivo = archivo.replace(/\.gif$/, `-${sha256.slice(0, 8)}.gif`);
     await escribirAtomico(path.join(dir, archivo), gif);
     imagenes.push({ archivo, hora, aprox, sha256, descargada: comprobado });
-    imagenes = imagenes.sort(ordenar).slice(-MAX_IMAGENES);
+    imagenes = recortarImagenes(imagenes);
 
     await escribirAtomico(rutaJson, JSON.stringify({ actualizado: comprobado, imagenes } satisfies RadarJson));
     const quedan = new Set(imagenes.map((i) => i.archivo));

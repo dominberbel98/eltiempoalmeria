@@ -1,7 +1,7 @@
 ---
 // /radar/: últimas imágenes del radar regional de AEMET en Almería (Níjar), con animación.
 import Base from "../layouts/Base.astro";
-import RadarAnimacion, { type FotogramaRadar } from "../components/RadarAnimacion";
+import RadarAnimacion, { type FotogramaRadar } from "../components/RadarAnimacion.astro";
 import { ALTO_RADAR, ANCHO_RADAR, ATRIBUCION_RADAR, MINUTOS_AVISO, URL_NOTA_LEGAL_AEMET, datosRadar } from "../lib/radar";
 
 const base = import.meta.env.BASE_URL;
@@ -75,7 +75,7 @@ const jsonLd = {
 
         {
           fotogramas.length ? (
-            <RadarAnimacion client:visible imagenes={fotogramas} ancho={ANCHO_RADAR} alto={ALTO_RADAR} />
+            <RadarAnimacion imagenes={fotogramas} ancho={ANCHO_RADAR} alto={ALTO_RADAR} />
           ) : (
             <div class="panel-oscuro texto-secundario">Cuando AEMET publique una imagen del radar aparecerá aquí.</div>
           )

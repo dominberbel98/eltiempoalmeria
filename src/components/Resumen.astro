@@ -35,7 +35,7 @@ const idTitulo = titular ? "titulo-municipio" : `titulo-ahora-${m.slug}`;
       <h1 id={idTitulo} class="titular titular-1 resumen-titulo">{m.nombre}</h1>
       <div class="resumen-pie">
         <p class="resumen-sub">{sub}</p>
-        <BotonFavorito client:idle slug={m.slug} nombre={m.nombre} className="resumen-favorito" />
+        <BotonFavorito client:visible slug={m.slug} nombre={m.nombre} className="resumen-favorito" />
       </div>
       <div class="resumen-ahora" data-solo-general>
         <span class="cifra-gigante">

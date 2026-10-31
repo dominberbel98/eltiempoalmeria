@@ -168,14 +168,20 @@ async function main() {
     }
   }
 
-  // updatedAt = hora del dato más reciente descargado de cualquier fuente. Del radar cuenta la hora de su
-  // última imagen (AEMET puede servir imágenes antiguas), no la de la descarga.
-  const tiempos = Object.entries(meta.fuentes)
-    .map(([clave, f]) => {
-      const fuente = f as { actualizado?: string | null; ultimaImagen?: string | null } | null;
-      return msIso(clave === "radar" ? fuente?.ultimaImagen : fuente?.actualizado);
-    })
-    .filter(Number.isFinite);
+  // updatedAt = hora del dato de predicción u observación más reciente publicado (lo que dice el pie y lo que dispara el
+  // aviso de datos desfasados). De AEMET cuenta la hora de elaboración de la predicción (no la de descarga, que se
+  // renueva aunque el tar traiga la misma edición); del radar, la de su última imagen (AEMET puede servir imágenes
+  // antiguas). La RIA no cuenta: publica datos diarios del día anterior y su "actualizado" es solo la hora de descarga.
+  const FUENTES_ACTUALIZACION: Record<string, (f: Record<string, any>) => number> = {
+    aemet: (f) => msElaborado(f.elaborado),
+    openMeteo: (f) => msIso(f.actualizado),
+    zonas: (f) => msIso(f.actualizado),
+    observaciones: (f) => msIso(f.actualizado),
+    radar: (f) => msIso(f.ultimaImagen),
+  };
+  const tiempos = Object.entries(FUENTES_ACTUALIZACION)
+    .map(([clave, hora]) => (meta.fuentes[clave] ? hora(meta.fuentes[clave] as Record<string, any>) : Number.NaN))
+    .filter((t) => Number.isFinite(t) && t <= ahoraMs + 10 * 60_000);
   if (tiempos.length) meta.updatedAt = new Date(Math.max(...tiempos)).toISOString();
   await escribirJson(path.join(DIR_DATOS, "meta.json"), meta);
 

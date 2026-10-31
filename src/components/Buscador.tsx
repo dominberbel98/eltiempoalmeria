@@ -1,11 +1,12 @@
 // Buscador de municipios y núcleos de población de Almería (isla client:idle).
 // Carga /buscar.json la primera vez que se enfoca el campo (o al pulsar "Usar mi ubicación").
-// Un núcleo lleva a /{municipio}/?vista=zonas&zona={id} si el municipio tiene vista por zonas.
+// Un núcleo lleva a /{municipio}/?vista=zonas&zona={id} si el municipio tiene vista por zonas (y &nucleo={codine} si
+// en el mapa cae en la celda de otra zona: la vista por zonas lo marca y explica por qué).
 // Los resultados son enlaces reales: con las flechas se pasa del campo a la lista y Escape vuelve al campo.
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type SyntheticEvent } from "react";
 
 /** Entrada de /buscar.json (src/pages/buscar.json.ts) */
-type Entrada = { n: string; m: string; z: string | null; t: "municipio" | "nucleo"; a?: string[]; p?: [number, number] };
+type Entrada = { n: string; m: string; z: string | null; t: "municipio" | "nucleo"; a?: string[]; p?: [number, number]; c?: string };
 /** Formato antiguo, aún aceptado: lista de municipios que se usa mientras no se ha cargado /buscar.json */
 type MunicipioSimple = { nombre: string; slug: string; lat: number; lon: number };
 
@@ -66,7 +67,8 @@ function puntuar(e: Indexada, q: string, tokens: string[]): Resultado | null {
   return null;
 }
 
-const enlace = (base: string, e: Entrada) => `${base}${e.m}/${e.t === "nucleo" && e.z ? `?vista=zonas&zona=${encodeURIComponent(e.z)}` : ""}`;
+const enlace = (base: string, e: Entrada) =>
+  `${base}${e.m}/${e.t === "nucleo" && e.z ? `?vista=zonas&zona=${encodeURIComponent(e.z)}${e.c ? `&nucleo=${encodeURIComponent(e.c)}` : ""}` : ""}`;
 const titulo = (e: Indexada) => (e.t === "nucleo" && e.municipioNombre ? `${e.n}, ${e.municipioNombre}` : e.n);
 
 // Límites aproximados de la provincia de Almería

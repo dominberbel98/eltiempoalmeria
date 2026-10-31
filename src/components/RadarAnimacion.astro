@@ -1,0 +1,236 @@
+---
+// Animación de las últimas imágenes del radar de AEMET en /radar/. Sin framework: el HTML se genera en el build y un
+// script pequeño cambia la imagen (así la página no carga React). Sin JavaScript se ve la imagen más reciente.
+// El deslizador o la lista eligen la imagen; el botón reproduce o pausa. La reproducción solo empieza al pulsar el
+// botón; con prefers-reduced-motion va más despacio.
+export type FotogramaRadar = {
+  src: string;
+  alt: string;
+  /** "14:10" o "hacia las 14:10" */
+  etiquetaHora: string;
+  /** "30 de octubre" */
+  fechaMadrid: string;
+  /** "30 de octubre de 2026, 14:10 (hora peninsular)" */
+  textoCompleto: string;
+  /** "−15 min", "−1 h 45" respecto a la última imagen; la última, "Ahora" o su hora si no es reciente */
+  relativa: string;
+};
+
+type Props = { imagenes: FotogramaRadar[]; ancho: number; alto: number };
+const { imagenes, ancho, alto } = Astro.props;
+const n = imagenes.length;
+const ultima = imagenes[n - 1];
+const textoValor = (im: FotogramaRadar, esUltima: boolean) => `${im.textoCompleto}${esUltima ? ", la más reciente" : ""}`;
+const fecha = (im: FotogramaRadar, esUltima: boolean) => (esUltima ? `${im.fechaMadrid}, la más reciente` : im.fechaMadrid);
+const datos = JSON.stringify(imagenes.map((im, j) => ({ src: im.src, alt: im.alt, hora: im.etiquetaHora, fecha: fecha(im, j === n - 1), valor: textoValor(im, j === n - 1) })));
+---
+
+{
+  ultima && (
+    <div class="radar-anim flex flex-col gap-[18px]" data-radar={datos}>
+      <figure class="m-0 flex justify-center rounded-[4px] bg-blanco p-2 md:p-3">
+        <img
+          src={ultima.src}
+          alt={ultima.alt}
+          width={ancho}
+          height={alto}
+          fetchpriority="high"
+          decoding="async"
+          class="block h-auto w-full max-w-[720px] [image-rendering:pixelated]"
+          data-radar-imagen
+        />
+      </figure>
+
+      {
+        n > 1 ? (
+          <>
+            <div class="radar-controles flex flex-wrap items-center gap-x-4 gap-y-2">
+              <button type="button" class="boton-reproducir" aria-label={`Reproducir las ${n} imágenes guardadas`} data-radar-boton>
+                <span class="flex" data-icono="reproducir">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                    <path d="M8 5v14l11-7z" />
+                  </svg>
+                </span>
+                <span class="flex" data-icono="pausar" hidden>
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                    <path d="M7 5h4v14H7zM13 5h4v14h-4z" />
+                  </svg>
+                </span>
+              </button>
+              <label for="radar-imagen" class="sr-only">
+                Imagen del radar
+              </label>
+              <input
+                id="radar-imagen"
+                type="range"
+                class="deslizador"
+                min="0"
+                max={n - 1}
+                step="1"
+                value={n - 1}
+                aria-valuetext={textoValor(ultima, true)}
+                data-radar-deslizador
+              />
+              <output for="radar-imagen" aria-live="polite" class="flex min-w-[9rem] flex-col leading-tight" data-radar-salida>
+                <span class="cifra text-[28px]" data-radar-hora>
+                  {ultima.etiquetaHora}
+                </span>
+                <span class="text-sm text-suave-oscuro" data-radar-fecha>
+                  {fecha(ultima, true)}
+                </span>
+              </output>
+            </div>
+            <ol
+              aria-label="Imágenes guardadas"
+              class="radar-lista m-0 grid list-none gap-1 p-0 text-center text-[13px] text-suave-oscuro"
+              style={`grid-template-columns: repeat(${n}, minmax(0, 1fr))`}
+            >
+              {imagenes.map((im, j) => (
+                <li>
+                  <button type="button" data-radar-paso={j} aria-current={j === n - 1 ? "true" : undefined}>
+                    {im.relativa}
+                    <span class="sr-only">, {im.textoCompleto}</span>
+                  </button>
+                </li>
+              ))}
+            </ol>
+          </>
+        ) : (
+          <p class="m-0 text-[15px] text-suave-oscuro">
+            Imagen del {ultima.textoCompleto}. No hay más imágenes de las 2 horas anteriores, así que no hay animación.
+          </p>
+        )
+      }
+    </div>
+  )
+}
+
+<style>
+  /* Sin JavaScript, los controles no sirven: se ocultan */
+  :global(html:not(.js)) .radar-controles,
+  :global(html:not(.js)) .radar-lista {
+    display: none;
+  }
+  .radar-lista button {
+    display: block;
+    width: 100%;
+    min-height: 44px;
+    padding: 6px 0 0;
+    border: 0;
+    border-top: 3px solid var(--color-borde-oscuro);
+    background: none;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+  }
+  .radar-lista button[aria-current="true"] {
+    border-top-color: var(--color-almagra);
+    font-weight: 700;
+    color: var(--color-cal);
+  }
+  .radar-lista button:hover {
+    color: var(--color-cal);
+  }
+</style>
+
+<script>
+  type Fotograma = { src: string; alt: string; hora: string; fecha: string; valor: string };
+
+  const PASO_MS = 800;
+  const PASO_LENTO_MS = 1600; // prefers-reduced-motion
+  const PAUSA_FINAL_MS = 1600; // la última imagen se queda un poco más antes de volver a empezar
+
+  for (const raiz of document.querySelectorAll<HTMLElement>("[data-radar]")) {
+    let fotogramas: Fotograma[] = [];
+    try {
+      fotogramas = JSON.parse(raiz.dataset.radar ?? "[]");
+    } catch {
+      continue;
+    }
+    const n = fotogramas.length;
+    const img = raiz.querySelector<HTMLImageElement>("[data-radar-imagen]");
+    const boton = raiz.querySelector<HTMLButtonElement>("[data-radar-boton]");
+    const deslizador = raiz.querySelector<HTMLInputElement>("[data-radar-deslizador]");
+    const salida = raiz.querySelector<HTMLOutputElement>("[data-radar-salida]");
+    const hora = raiz.querySelector<HTMLElement>("[data-radar-hora]");
+    const fecha = raiz.querySelector<HTMLElement>("[data-radar-fecha]");
+    const pasos = [...raiz.querySelectorAll<HTMLButtonElement>("[data-radar-paso]")];
+    if (n < 2 || !img || !boton || !deslizador) continue;
+
+    let i = n - 1;
+    let reproduciendo = false;
+    let temporizador = 0;
+    let precargadas = false;
+
+    // Precarga las imágenes la primera vez que se va a necesitar otra distinta de la última
+    const precargar = () => {
+      if (precargadas) return;
+      precargadas = true;
+      for (const f of fotogramas) new Image().src = f.src;
+    };
+
+    const mostrar = (j: number) => {
+      i = j;
+      const f = fotogramas[j];
+      img.src = f.src;
+      img.alt = f.alt;
+      deslizador.value = String(j);
+      deslizador.setAttribute("aria-valuetext", f.valor);
+      if (hora) hora.textContent = f.hora;
+      if (fecha) fecha.textContent = f.fecha;
+      pasos.forEach((p, k) => (k === j ? p.setAttribute("aria-current", "true") : p.removeAttribute("aria-current")));
+    };
+
+    const pintarBoton = () => {
+      boton.setAttribute("aria-label", reproduciendo ? "Pausar la animación" : `Reproducir las ${n} imágenes guardadas`);
+      boton.querySelector<HTMLElement>('[data-icono="reproducir"]')?.toggleAttribute("hidden", reproduciendo);
+      boton.querySelector<HTMLElement>('[data-icono="pausar"]')?.toggleAttribute("hidden", !reproduciendo);
+      salida?.setAttribute("aria-live", reproduciendo ? "off" : "polite");
+    };
+
+    const siguiente = () => {
+      if (!reproduciendo) return;
+      const lento = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      const paso = lento ? PASO_LENTO_MS : PASO_MS;
+      temporizador = window.setTimeout(() => {
+        mostrar((i + 1) % n);
+        siguiente();
+      }, i === n - 1 ? Math.max(paso, PAUSA_FINAL_MS) : paso);
+    };
+
+    const parar = () => {
+      reproduciendo = false;
+      window.clearTimeout(temporizador);
+      pintarBoton();
+    };
+
+    boton.addEventListener("click", () => {
+      precargar();
+      if (reproduciendo) {
+        parar();
+        return;
+      }
+      if (i === n - 1) mostrar(0); // desde la última, la animación empieza por la más antigua
+      reproduciendo = true;
+      pintarBoton();
+      siguiente();
+    });
+    deslizador.addEventListener("pointerdown", precargar);
+    deslizador.addEventListener("keydown", precargar);
+    deslizador.addEventListener("input", () => {
+      parar();
+      mostrar(Number(deslizador.value));
+    });
+    pasos.forEach((p, k) =>
+      p.addEventListener("click", () => {
+        precargar();
+        parar();
+        mostrar(k);
+      })
+    );
+    // Pausa si la pestaña deja de verse
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) parar();
+    });
+  }
+</script>

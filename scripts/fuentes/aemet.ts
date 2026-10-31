@@ -9,6 +9,7 @@ import { Readable } from "node:stream";
 import { createGunzip } from "node:zlib";
 import {
   ClienteAemet,
+  esFalloDeServicio,
   guardarDatosMunicipio,
   horaLegible,
   leerDatosMunicipio,
@@ -29,6 +30,12 @@ const REINTENTO_TODOS_MS = 30 * 60_000;
 const REINTENTO_MUNICIPIOS_MS = 60 * 60_000;
 const LOTE_MUNICIPIOS = 35;
 const MAX_INTENTOS_PUBLICADO = 4; // tras 4 descargas sin alcanzar la edición anunciada, se deja de perseguir
+// Presupuesto de tiempo del módulo: si AEMET se cuelga, la ejecución tiene que acabar muy por debajo del timeout
+// del job (30 min). Si el job se corta, la caché no se guarda y la ejecución siguiente repetiría lo mismo.
+const PRESUPUESTO_MS = 6 * 60_000;
+// Respaldo por municipio: llamadas cortas y corte tras varios fallos seguidos de red, 5xx o 429
+const OPCIONES_RESPALDO = { intentos: 2, timeoutMs: 20_000, ante429: () => null };
+const MAX_FALLOS_SEGUIDOS = 2;
 const PROVINCIA = "Almería";
 
 type Tipo = "horaria" | "diaria";
@@ -411,6 +418,7 @@ async function actualizarAemet(
   resultado: (r: Omit<ResultadoFuente, "fuente" | "peticionesAemet">) => ResultadoFuente
 ): Promise<ResultadoFuente> {
   const ahora = ctx.ahora.getTime();
+  const limite = Date.now() + PRESUPUESTO_MS;
   const nuevo: EstadoAemet = {
     actualizado: ant.actualizado ?? null,
     elaborado: ant.elaborado ?? null,
@@ -430,10 +438,10 @@ async function actualizarAemet(
   const estado = await leerEstado(ctx, municipios);
   const notas: string[] = [];
 
-  // 1. ATOM (sin clave, condicional)
+  // 1. ATOM (sin clave, condicional). Solo If-Modified-Since: el ETag cambia de un servidor de AEMET a otro (y lleva un
+  // sufijo de Dynatrace); si se manda If-None-Match, tiene prioridad y el servidor responde 200 casi siempre.
   try {
     const cab: Record<string, string> = {};
-    if (nuevo.atom?.etag) cab["If-None-Match"] = nuevo.atom.etag;
     if (nuevo.atom?.lastModified) cab["If-Modified-Since"] = nuevo.atom.lastModified;
     const r = await cliente.pedir(ATOM, { cabeceras: cab, aceptar: [304], intentos: 2, timeoutMs: 20_000, etiqueta: "ATOM" });
     nuevo.comprobado = ctx.ahora.toISOString();
@@ -476,10 +484,17 @@ async function actualizarAemet(
   } else {
     let elaboradoTar = Number.POSITIVE_INFINITY; // el más antiguo de los dos tar descargados
     let tiposOk = 0;
+    let servicioCaido = false;
     for (const tipo of ["horaria", "diaria"] as const) {
+      if (servicioCaido || Date.now() > limite) {
+        // AEMET no responde (red, 5xx o 429) o se acabó el tiempo: el segundo tar fallaría igual
+        todosFallo = true;
+        notas.push(`${tipo}/todos no se intenta (${servicioCaido ? "AEMET no responde" : "sin tiempo"})`);
+        continue;
+      }
       try {
         const t0 = Date.now();
-        const r = await cliente.datos(`/prediccion/especifica/municipio/${tipo}/todos`, /octet-stream|gzip|x-tar/i, 180_000);
+        const r = await cliente.datos(`/prediccion/especifica/municipio/${tipo}/todos`, /octet-stream|gzip|x-tar/i, 120_000, { intentos: 2 });
         if (r.bytes[0] !== 0x1f || r.bytes[1] !== 0x8b) throw new Error("los datos no son gzip");
         const quiero = new Set(municipios.map((m) => ARCHIVO[tipo](m.id)));
         const ficheros = await extraerTar(r.bytes, quiero);
@@ -528,6 +543,7 @@ async function actualizarAemet(
         tiposOk++;
       } catch (e) {
         todosFallo = true;
+        if (esFalloDeServicio(e)) servicioCaido = true;
         notas.push(`${tipo}/todos falló (${mensajeError(e)})`);
       }
     }
@@ -561,6 +577,8 @@ async function actualizarAemet(
     let exitos = 0;
     let fallos = 0;
     let sinProgreso = false;
+    let seguidos = 0; // fallos seguidos de red, 5xx o 429
+    let cortado = "";
     let objetivoLote = objetivoRespaldo;
     ctx.log(`  respaldo por municipio: ${lote.length} de ${faltan.length} pendientes`);
     for (const f of lote) {
@@ -568,8 +586,12 @@ async function actualizarAemet(
       const e = estado.get(f.id)!;
       for (const tipo of f.tipos) {
         if (Number.isFinite(e[tipo]) && e[tipo] >= objetivoLote) continue;
+        if (Date.now() > limite) {
+          cortado = "sin tiempo";
+          break;
+        }
         try {
-          const lista = await cliente.json<unknown>(`/prediccion/especifica/municipio/${tipo}/${m.id}`);
+          const lista = await cliente.json<unknown>(`/prediccion/especifica/municipio/${tipo}/${m.id}`, OPCIONES_RESPALDO);
           const pred = toArray(lista as unknown[])[0] as Prediccion & Record<string, unknown>;
           const fallo = validar(pred, tipo, ctx.ahora);
           if (fallo) throw new Error(fallo);
@@ -585,17 +607,26 @@ async function actualizarAemet(
             sinProgreso = true;
             break;
           }
+          seguidos = 0;
         } catch (err) {
           fallos++;
           ctx.log(`  fallo ${tipo} ${m.id} ${m.nombre}: ${mensajeError(err)}`);
+          seguidos = esFalloDeServicio(err) ? seguidos + 1 : 0;
+          if (seguidos >= MAX_FALLOS_SEGUIDOS) {
+            cortado = `${seguidos} fallos seguidos de AEMET`;
+            break;
+          }
         }
       }
-      if (sinProgreso) break;
+      if (sinProgreso || cortado) break;
     }
     if (exitos > 0) nuevo.modo = descargaCompleta ? "todos" : "municipio";
-    nuevo.reintentoMunicipios = exitos === 0 && (fallos > 0 || sinProgreso) ? new Date(ahora + REINTENTO_MUNICIPIOS_MS).toISOString() : null;
+    nuevo.reintentoMunicipios =
+      cortado || (exitos === 0 && (fallos > 0 || sinProgreso)) ? new Date(ahora + REINTENTO_MUNICIPIOS_MS).toISOString() : null;
     faltan = rezagados(estado, objetivoLote);
-    notas.push(`respaldo: ${exitos} predicciones nuevas, ${fallos} fallos${sinProgreso ? ", AEMET sin edición nueva" : ""}`);
+    notas.push(
+      `respaldo: ${exitos} predicciones nuevas, ${fallos} fallos${sinProgreso ? ", AEMET sin edición nueva" : ""}${cortado ? `, cortado (${cortado})` : ""}`
+    );
   }
 
   if (escritos > 0 || descargaCompleta) nuevo.actualizado = ctx.ahora.toISOString();

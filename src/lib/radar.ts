@@ -2,7 +2,7 @@
 // Los GIF se sirven desde public/radar/ (los copia scripts/fuentes/radar.ts antes del build).
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
-import type { ImagenRadar, RadarJson } from "../../scripts/fuentes/radar";
+import { recortarImagenes, type ImagenRadar, type RadarJson } from "../../scripts/fuentes/radar";
 
 export type { ImagenRadar, RadarJson };
 
@@ -29,7 +29,7 @@ export type ImagenRadarPagina = {
   etiquetaHora: string;
   /** "28 de octubre de 2026, 20:30 (hora peninsular)" con "hacia las" si es aproximada */
   textoCompleto: string;
-  /** Respecto a la última imagen: "Ahora", "−15 min", "−1 h", "−1 h 45" */
+  /** Respecto a la última imagen: "−15 min", "−1 h", "−1 h 45"; la última, "Ahora" si es reciente o su hora si no */
   relativa: string;
   /** Minutos antes de la última imagen (0 en la última) */
   minutosAntes: number;
@@ -59,13 +59,14 @@ function leerRadar(): RadarJson {
   }
 }
 
-/** radar.json tal cual, solo con las imágenes cuyo GIF está en public/radar/ (las que se pueden servir). */
+/**
+ * radar.json con las imágenes cuyo GIF está en public/radar/ (las que se pueden servir), y solo las de las 2 h
+ * anteriores a la más reciente (por si en la caché quedan restos de antes de un corte del radar).
+ */
 export function getRadar(): RadarJson {
   const r = leerRadar();
-  return {
-    actualizado: r.actualizado,
-    imagenes: r.imagenes.filter((i) => /^[\w-]+\.gif$/.test(i.archivo) && existsSync(path.join(DIR_PUBLICO, i.archivo))),
-  };
+  const servibles = r.imagenes.filter((i) => /^[\w-]+\.gif$/.test(i.archivo) && existsSync(path.join(DIR_PUBLICO, i.archivo)));
+  return { actualizado: r.actualizado, imagenes: recortarImagenes(servibles) };
 }
 
 const horaFmt = new Intl.DateTimeFormat("es-ES", { timeZone: ZONA, hour: "2-digit", minute: "2-digit", hour12: false });
@@ -120,6 +121,8 @@ export function datosRadar(ahora: Date = new Date()): DatosRadar {
   const ultima = imagenes.at(-1) ?? null;
   const minutosDesdeUltima = tUltima === null ? null : Math.max(0, Math.round((ahora.getTime() - tUltima) / 60_000));
   const antigua = minutosDesdeUltima === null || minutosDesdeUltima > MINUTOS_AVISO;
+  // "Ahora" solo si la última imagen es reciente; si no, su hora (el aviso de encima dice cuánto hace)
+  if (ultima && antigua) ultima.relativa = ultima.etiquetaHora;
   let aviso: string | null = null;
   if (!ultima) aviso = "Ahora mismo no hay imágenes del radar disponibles. AEMET no ha publicado ninguna o no se han podido descargar.";
   else if (antigua && minutosDesdeUltima !== null)

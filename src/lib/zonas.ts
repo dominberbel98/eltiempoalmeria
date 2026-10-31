@@ -2,7 +2,16 @@
 // Definiciones: scripts/zonas-almeria.json (versionado). Datos: src/data/zonas/{municipio}.json (scripts/fuentes/zonas.ts).
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { celdasVoronoi, geoMulti, mascara, terminoMunicipio, type ColeccionCeldas, type GeoMultiPolygon } from "./geozonas";
+import {
+  celdasVoronoi,
+  escalaLon,
+  geoMulti,
+  indiceMasCercano,
+  mascara,
+  terminoMunicipio,
+  type ColeccionCeldas,
+  type GeoMultiPolygon,
+} from "./geozonas";
 import { horaLocal } from "./tiempo";
 
 export type TipoZona = "capital" | "nucleo" | "terreno";
@@ -62,6 +71,12 @@ export type ZonaEndpoint = {
   dias: DiaZona[];
 };
 
+/**
+ * Núcleo de población que el buscador lleva a una zona cuyo polígono del mapa no lo contiene: comparte celda del
+ * modelo con esa zona (misma previsión), pero en el mapa cae en la celda de otra (zonaMapa).
+ */
+export type NucleoDesplazado = { id: string; nombre: string; lat: number; lon: number; zona: string; zonaMapa: string };
+
 /** Formato de /zonas/{slug}.json */
 export type EndpointZonas = {
   municipio: { id: string; slug: string; nombre: string };
@@ -69,6 +84,9 @@ export type EndpointZonas = {
   pasada: string | null;
   horas: string[];
   dias: string[];
+  /** Si dias[0] es hoy y solo se resumen las horas que quedan: la primera de ellas ("17:00"). Si no, null. */
+  desdeHoy: string | null;
+  nucleos: NucleoDesplazado[];
   contorno: GeoMultiPolygon;
   mascara: GeoMultiPolygon;
   celdas: ColeccionCeldas;
@@ -76,8 +94,12 @@ export type EndpointZonas = {
 };
 
 export const MIN_HORAS_DIA = 18;
+/** Hoy se resume con las horas que quedan si son al menos estas (tormenta, lluvia, rachas y helada de esta tarde o esta noche). */
+export const MIN_HORAS_HOY = 6;
 export const MAX_DIAS = 5;
 export const MAX_HORAS = 78;
+/** ICON-EU es horario hasta +78 h desde el inicio de la pasada; después, cada 3 h (Open-Meteo interpola). */
+export const HORAS_DETALLE_ICON = 78;
 const CAPE_TORMENTA = 800; // J/kg
 const PROB_TORMENTA = 30; // %
 const UMBRAL_CALOR = 35; // °C
@@ -176,12 +198,22 @@ function resumirDia(fecha: string, s: SerieZona | undefined, indices: number[]):
   };
 }
 
+export type ResumenDiario = {
+  dias: string[];
+  porZona: Map<string, DiaZona[]>;
+  /** Si dias[0] es hoy resumido solo con las horas que quedan: la primera ("17:00"). Si no, null. */
+  desdeHoy: string | null;
+};
+
 /**
  * Días con al menos MIN_HORAS_DIA horas de detalle (hasta ultimaHoraDetalle), desde hoy y como mucho MAX_DIAS,
- * y su resumen por zona.
+ * y su resumen por zona. Con `hoyParcial`, si hoy no llega a MIN_HORAS_DIA (la serie empieza a la hora de la descarga)
+ * pero le quedan al menos MIN_HORAS_HOY, hoy se resume con las horas que quedan desde `ahora` (desdeHoy). Sirve para
+ * tormenta, lluvia, rachas y helada de esta tarde o esta noche; la mínima y la máxima de ese resumen no son las del día.
  */
-export function resumenDiario(archivo: ArchivoZonas, ahora = new Date()): { dias: string[]; porZona: Map<string, DiaZona[]> } {
-  const hoy = horaLocal(ahora).slice(0, 10);
+export function resumenDiario(archivo: ArchivoZonas, ahora = new Date(), { hoyParcial = false } = {}): ResumenDiario {
+  const desde = horaLocal(ahora);
+  const hoy = desde.slice(0, 10);
   const indicesPorDia = new Map<string, number[]>();
   archivo.horas.forEach((t, i) => {
     if (t > archivo.ultimaHoraDetalle) return;
@@ -189,17 +221,27 @@ export function resumenDiario(archivo: ArchivoZonas, ahora = new Date()): { dias
     if (!indicesPorDia.has(f)) indicesPorDia.set(f, []);
     indicesPorDia.get(f)!.push(i);
   });
+  let desdeHoy: string | null = null;
+  const hoyIdx = indicesPorDia.get(hoy) ?? [];
+  if (hoyParcial && hoyIdx.length < MIN_HORAS_DIA) {
+    const quedan = hoyIdx.filter((i) => archivo.horas[i] >= desde);
+    if (quedan.length >= MIN_HORAS_HOY) {
+      indicesPorDia.set(hoy, quedan);
+      desdeHoy = archivo.horas[quedan[0]].slice(11, 16);
+    }
+  }
   const dias = [...indicesPorDia.entries()]
-    .filter(([f, idx]) => f >= hoy && idx.length >= MIN_HORAS_DIA)
+    .filter(([f, idx]) => f >= hoy && (idx.length >= MIN_HORAS_DIA || (f === hoy && desdeHoy != null)))
     .map(([f]) => f)
     .sort()
     .slice(0, MAX_DIAS);
+  if (dias[0] !== hoy) desdeHoy = null;
   const series = new Map(archivo.zonas.map((z) => [z.id, z.serie]));
   const porZona = new Map<string, DiaZona[]>();
   for (const z of zonasDeMunicipio(archivo.municipio)) {
     porZona.set(z.id, dias.map((f) => resumirDia(f, series.get(z.id), indicesPorDia.get(f)!)));
   }
-  return { dias, porZona };
+  return { dias, porZona, desdeHoy };
 }
 
 // ---------- Frases de diferencias ----------
@@ -249,13 +291,29 @@ type Candidata = { tipo: string; dia: number; puntos: number; frase: string };
 const PESO_DIA = [1, 1, 0.9, 0.8, 0.7];
 const ORDEN_TIPO = ["helada", "min", "max", "racha", "lluvia", "tormenta"];
 
-function candidatasDelDia(defs: ZonaDef[], dias: DiaZona[][], j: number, fecha: string): Candidata[] {
+/**
+ * Cuándo, para las frases: "el sábado 31" o, si hoy solo cuenta desde una hora, "hoy", "esta tarde y esta noche"
+ * o "esta noche". `de`: "del sábado 31", "de hoy", "de esta noche".
+ */
+function cuandoEnFrase(fecha: string, desdeHoy: string | null): { cuando: string; de: string } {
+  if (desdeHoy == null) {
+    const cuando = fechaEnFrase(fecha);
+    return { cuando, de: cuando.replace(/^el /, "del ") };
+  }
+  const h = Number(desdeHoy.slice(0, 2));
+  const cuando = h < 13 ? "hoy" : h < 20 ? "esta tarde y esta noche" : "esta noche";
+  return { cuando, de: `de ${cuando}` };
+}
+
+function candidatasDelDia(defs: ZonaDef[], dias: DiaZona[][], j: number, fecha: string, desdeHoy: string | null = null): Candidata[] {
   const salida: Candidata[] = [];
   const nombre = (k: number) => nombreEnFrase(defs[k], defs);
   const zonas = defs.map((_, k) => k).filter((k) => dias[k]?.[j]);
   const d = (k: number) => dias[k][j];
-  const cuando = fechaEnFrase(fecha);
+  const { cuando, de } = cuandoEnFrase(fecha, desdeHoy);
   const Cuando = mayuscula(cuando);
+  // Hoy desde una hora: la mínima y la máxima de las horas que quedan no son las del día; no se comparan
+  const parcial = desdeHoy != null;
   const extremos = (campo: "min" | "max" | "racha") => {
     const con = zonas.filter((k) => valido(d(k)[campo]));
     if (con.length < 2) return null;
@@ -302,7 +360,7 @@ function candidatasDelDia(defs: ZonaDef[], dias: DiaZona[][], j: number, fecha: 
     });
   }
   // Rango de mínimas y de máximas (≥3 °C)
-  for (const campo of ["min", "max"] as const) {
+  for (const campo of parcial ? [] : (["min", "max"] as const)) {
     const e = extremos(campo);
     if (e && e.rango >= 3 && Math.round(d(e.hi)[campo]!) !== Math.round(d(e.lo)[campo]!)) {
       salida.push({
@@ -320,7 +378,7 @@ function candidatasDelDia(defs: ZonaDef[], dias: DiaZona[][], j: number, fecha: 
       tipo: "racha",
       dia: j,
       puntos: Math.min(2.5, 1 + (e.rango - 15) / 10),
-      frase: `Las rachas más fuertes ${cuando.replace(/^el /, "del ")}, ${d(e.hi).racha} km/h, serán en ${nombre(e.hi)}; en ${nombre(e.lo)}, ${d(e.lo).racha} km/h.`,
+      frase: `Las rachas más fuertes ${de}, ${d(e.hi).racha} km/h, serán en ${nombre(e.hi)}; en ${nombre(e.lo)}, ${d(e.lo).racha} km/h.`,
     });
   }
   return salida;
@@ -334,12 +392,12 @@ export function diferencias(municipioId: string, ahora = new Date()): string[] {
   const defs = zonasDeMunicipio(municipioId);
   const archivo = getArchivoZonas(municipioId);
   if (defs.length < 2 || !archivo) return [];
-  const { dias, porZona } = resumenDiario(archivo, ahora);
+  const { dias, porZona, desdeHoy } = resumenDiario(archivo, ahora, { hoyParcial: true });
   const tabla = defs.map((z) => porZona.get(z.id) ?? []);
   // La mejor ocasión de cada tipo de diferencia (más marcada y más cercana)
   const mejores = new Map<string, Candidata & { valor: number }>();
   dias.forEach((fecha, j) => {
-    for (const c of candidatasDelDia(defs, tabla, j, fecha)) {
+    for (const c of candidatasDelDia(defs, tabla, j, fecha, j === 0 ? desdeHoy : null)) {
       const valor = c.puntos * (PESO_DIA[j] ?? 0.6);
       const actual = mejores.get(c.tipo);
       if (!actual || valor > actual.valor) mejores.set(c.tipo, { ...c, valor });
@@ -379,11 +437,20 @@ export function construirZonasEndpoint(municipio: { id: string; slug: string; no
   if (!defs.length || !termino) return null;
   const archivo = getArchivoZonas(municipio.id);
   const desde = horaLocal(ahora);
+  // Horas con detalle horario real: hasta ultimaHoraDetalle y como mucho la pasada + 78 h (después ICON-EU va cada 3 h)
+  const finPasada = archivo?.pasada ? Date.parse(archivo.pasada) + HORAS_DETALLE_ICON * 3_600_000 : Number.NaN;
+  const hasta = archivo
+    ? Number.isFinite(finPasada)
+      ? [archivo.ultimaHoraDetalle, horaLocal(new Date(finPasada))].sort()[0]
+      : archivo.ultimaHoraDetalle
+    : "";
   const indices: number[] = [];
   archivo?.horas.forEach((t, i) => {
-    if (t >= desde && t <= archivo.ultimaHoraDetalle && indices.length < MAX_HORAS) indices.push(i);
+    if (t >= desde && t <= hasta && indices.length < MAX_HORAS) indices.push(i);
   });
-  const resumen = archivo ? resumenDiario(archivo, ahora) : { dias: [], porZona: new Map<string, DiaZona[]>() };
+  const resumen: ResumenDiario = archivo
+    ? resumenDiario(archivo, ahora, { hoyParcial: true })
+    : { dias: [], porZona: new Map<string, DiaZona[]>(), desdeHoy: null };
   const series = new Map((archivo?.zonas ?? []).map((z) => [z.id, z.serie]));
   return {
     municipio: { id: municipio.id, slug: municipio.slug, nombre: municipio.nombre },
@@ -391,6 +458,8 @@ export function construirZonasEndpoint(municipio: { id: string; slug: string; no
     pasada: archivo?.pasada ?? null,
     horas: indices.map((i) => archivo!.horas[i]),
     dias: resumen.dias,
+    desdeHoy: resumen.desdeHoy,
+    nucleos: nucleosDesplazados(municipio.id),
     contorno: geoMulti(termino),
     mascara: geoMulti(mascara(termino)),
     celdas: celdasVoronoi(termino, defs),
@@ -418,4 +487,48 @@ export function construirZonasEndpoint(municipio: { id: string; slug: string; no
       };
     }),
   };
+}
+
+// ---------- Núcleos que el buscador lleva a una zona de otra celda del mapa ----------
+
+type NucleoDef = { id: string; municipio: string; nombre: string; lat: number; lon: number };
+let cacheNucleos: NucleoDef[] | null = null;
+
+function getNucleos(): NucleoDef[] {
+  if (cacheNucleos) return cacheNucleos;
+  try {
+    const lista = JSON.parse(readFileSync(path.resolve("scripts/nucleos-almeria.json"), "utf8")) as NucleoDef[];
+    cacheNucleos = Array.isArray(lista) ? lista : [];
+  } catch {
+    cacheNucleos = [];
+  }
+  return cacheNucleos;
+}
+
+const cacheDesplazados = new Map<string, NucleoDesplazado[]>();
+
+/**
+ * Núcleos del municipio que el buscador lleva a una zona (la de su celda del modelo, con la misma previsión) cuyo
+ * polígono del mapa no los contiene: en el mapa caen en la celda de Voronoi de otra zona. La vista por zonas lo explica
+ * y marca el núcleo cuando se llega desde el buscador (?nucleo=).
+ */
+export function nucleosDesplazados(municipioId: string): NucleoDesplazado[] {
+  const enCache = cacheDesplazados.get(municipioId);
+  if (enCache) return enCache;
+  const defs = zonasDeMunicipio(municipioId);
+  const termino = defs.length >= 2 ? terminoMunicipio(municipioId) : null;
+  const salida: NucleoDesplazado[] = [];
+  if (termino) {
+    const k = escalaLon(termino);
+    const zonaDe = new Map(defs.flatMap((z) => z.nucleos.map((n) => [n, z.id] as const)));
+    for (const n of getNucleos()) {
+      if (n.municipio !== municipioId) continue;
+      const zona = zonaDe.get(n.id);
+      if (!zona || zona === n.id) continue;
+      const zonaMapa = defs[indiceMasCercano(n.lon, n.lat, defs, k)]?.id;
+      if (zonaMapa && zonaMapa !== zona) salida.push({ id: n.id, nombre: n.nombre, lat: n.lat, lon: n.lon, zona, zonaMapa });
+    }
+  }
+  cacheDesplazados.set(municipioId, salida);
+  return salida;
 }

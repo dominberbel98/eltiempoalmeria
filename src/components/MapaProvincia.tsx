@@ -5,6 +5,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import "leaflet/dist/leaflet.css";
 import "./MapaProvincia.css";
+import "./mapa/mapa.css"; // estilos de VistaZonas (modo foco), que se carga con import dinámico
 import type * as Leaflet from "leaflet";
 import { diaConNumero } from "../lib/tiempo";
 
@@ -349,6 +350,14 @@ export default function MapaProvincia({
           });
         },
       }).addTo(mapa);
+      // El tooltip de Leaflet escucha focus en cada término y Chrome hace enfocables los elementos SVG con esa escucha:
+      // serían 103 paradas de tabulación sin nombre. Se sacan del orden de tabulación; con teclado, el mapa se maneja con
+      // la tabla de debajo («Ver zonas» de cada municipio), que tiene los mismos datos.
+      for (const path of capas.current.values()) {
+        const el = path.getElement();
+        el?.setAttribute("tabindex", "-1");
+        el?.setAttribute("aria-hidden", "true");
+      }
 
       grupoFlechas.current = lf.layerGroup();
       for (const m of d.municipios) {
