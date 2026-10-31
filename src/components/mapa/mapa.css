@@ -1,0 +1,259 @@
+/*
+  Estilos de los mapas de un término (VistaZonas y modo foco del mapa provincial).
+  Prefijos: mz- (piezas de mapa reutilizables) y vz- (maquetación de VistaZonas).
+  Colores con los tokens de global.css.
+*/
+
+/* ---------- Mapa ---------- */
+.mz-caja {
+  position: relative;
+  height: 340px;
+  border-radius: 2px;
+  overflow: hidden;
+  background: var(--color-basalto);
+}
+@media (min-width: 48rem) {
+  .mz-caja {
+    height: 520px;
+  }
+}
+.mz-mapa {
+  position: absolute;
+  inset: 0;
+}
+.mz-mapa.leaflet-container {
+  background: var(--color-basalto);
+  font: inherit;
+  outline-offset: -3px;
+}
+.mz-mapa .leaflet-interactive {
+  cursor: pointer;
+}
+/* Estado (cargando, error) dentro de la caja del mapa */
+.mz-estado {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 12px;
+  padding: 24px;
+  color: var(--color-suave-oscuro);
+  font-size: 15px;
+  line-height: 1.5;
+}
+.mz-estado p {
+  margin: 0;
+  max-width: 46ch;
+}
+
+/* Controles de zoom de Leaflet sobre basalto, con objetivo táctil de 44 px */
+.mz-mapa .leaflet-bar {
+  border: 1px solid var(--color-borde-oscuro);
+  border-radius: 4px;
+  box-shadow: none;
+}
+.mz-mapa .leaflet-bar a,
+.mz-mapa .leaflet-bar a:hover {
+  width: 44px;
+  height: 44px;
+  line-height: 44px;
+  background: var(--color-basalto-2);
+  color: var(--color-cal);
+  border-bottom-color: var(--color-borde-oscuro);
+  font-size: 20px;
+}
+.mz-mapa .leaflet-bar a:hover {
+  background: var(--color-borde-oscuro);
+}
+.mz-mapa .leaflet-bar a.leaflet-disabled {
+  background: var(--color-basalto);
+  color: var(--color-borde-oscuro);
+}
+
+/* ---------- Etiquetas de zona ---------- */
+/* Icono de Leaflet sin el fondo blanco por defecto de .leaflet-div-icon */
+.mz-icono {
+  background: none;
+  border: 0;
+}
+.mz-et {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: block;
+  height: 24px;
+  padding: 3px 8px;
+  border-radius: 3px;
+  background: var(--color-basalto);
+  color: var(--color-cal);
+  font-size: 14px;
+  line-height: 18px;
+  white-space: nowrap;
+  pointer-events: none;
+  font-variant-numeric: tabular-nums;
+}
+.mz-et strong {
+  font-weight: 700;
+}
+/* Separación de 8 px con el punto (SEPARACION en etiquetas.ts) */
+.mz-et-der {
+  transform: translate(8px, -50%);
+}
+.mz-et-izq {
+  transform: translate(calc(-100% - 8px), -50%);
+}
+.mz-et-arriba {
+  transform: translate(-50%, calc(-100% - 8px));
+}
+.mz-et-abajo {
+  transform: translate(-50%, 8px);
+}
+.mz-et-sel {
+  background: var(--color-almagra);
+  color: var(--color-blanco);
+  outline: 2px solid var(--color-cal);
+}
+.mz-et-oculta {
+  display: none;
+}
+
+/* ---------- Maquetación de VistaZonas ---------- */
+.vz {
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+}
+@media (min-width: 48rem) {
+  .vz {
+    gap: 48px;
+  }
+}
+.vz-cuerpo {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 32px;
+}
+.vz-panel {
+  flex: 999 1 560px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px 12px;
+  border-radius: 4px;
+  background: var(--color-basalto);
+  color: var(--color-cal);
+}
+@media (min-width: 48rem) {
+  .vz-panel {
+    padding: 20px;
+  }
+}
+/* En el modo foco del mapa provincial el panel ya está sobre basalto */
+.vz-compacto .vz-panel {
+  padding: 0;
+  background: transparent;
+}
+.vz-fila {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+.vz-titulo {
+  margin: 0;
+  font-size: 26px;
+}
+@media (min-width: 48rem) {
+  .vz-titulo {
+    font-size: 30px;
+  }
+}
+.vz-horas {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+}
+.vz-horas label {
+  font-size: 15px;
+}
+.vz-horas output {
+  min-width: 11ch;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.vz-nota-mapa {
+  font-size: 14px;
+  color: var(--color-suave-oscuro);
+}
+.vz-lado {
+  flex: 1 1 380px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.vz-tabla {
+  font-size: 15px;
+}
+.vz-tabla thead th {
+  font-size: 13px;
+}
+/* Este fichero no va en una capa, así que manda sobre .tabla (global.css, @layer components):
+   solo se tocan los rellenos verticales para no perder los laterales de la primera y la última columna */
+.vz-tabla tbody th,
+.vz-tabla tbody td {
+  padding-block: 4px;
+}
+.vz-tabla :is(th, td):not(:first-child, :last-child) {
+  padding-inline: 8px;
+}
+.vz-tabla .num {
+  white-space: nowrap;
+}
+.vz-tabla tbody tr.destacada > th {
+  padding-left: 6px;
+}
+.vz-tabla tbody tr.destacada > :last-child {
+  padding-right: 6px;
+}
+/* Botón de zona con aspecto de enlace: nombre y, debajo, altitud (objetivo de 44 px) */
+.vz-zona {
+  display: block;
+  min-height: 44px;
+  padding: 4px 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+.vz-zona .vz-zona-nombre {
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+.vz-zona:hover .vz-zona-nombre {
+  color: var(--color-almagra);
+}
+.vz-zona[aria-pressed="true"] {
+  font-weight: 700;
+}
+.vz-zona-sub {
+  display: block;
+  font-weight: 400;
+  font-size: 13px;
+  color: var(--color-ceniza);
+}
+.vz-meteograma {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  scroll-margin-top: 16px;
+}
