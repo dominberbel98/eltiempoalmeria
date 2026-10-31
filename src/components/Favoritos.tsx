@@ -1,6 +1,5 @@
-// Favoritos guardados solo en este navegador (localStorage)
+// "Tus municipios": favoritos guardados solo en este navegador (localStorage).
 import { useEffect, useState } from "react";
-import { Star } from "lucide-react";
 
 const CLAVE = "almeria-favoritos";
 
@@ -16,46 +15,61 @@ function guardar(lista: string[]) {
   try {
     localStorage.setItem(CLAVE, JSON.stringify(lista));
   } catch {
-    // modo privado o almacenamiento bloqueado: el favorito no persiste, pero la página sigue funcionando
+    // Modo privado o almacenamiento bloqueado: el favorito no persiste, pero la página sigue funcionando
   }
 }
 
-export function BotonFavorito({ slug, nombre }: { slug: string; nombre: string }) {
+function Estrella({ llena }: { llena: boolean }) {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill={llena ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2" strokeLinejoin="round" aria-hidden="true">
+      <path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2L12 17.3 6.4 20.2l1.1-6.2L3 9.6l6.2-.9z" />
+    </svg>
+  );
+}
+
+// Botón "Guardar en tus municipios" (pastilla con aria-pressed). `className` permite, p. ej., ocupar todo el ancho en móvil.
+export function BotonFavorito({ slug, nombre, className = "" }: { slug: string; nombre: string; className?: string }) {
   const [favs, setFavs] = useState<string[]>([]);
   useEffect(() => setFavs(leer()), []);
   const es = favs.includes(slug);
   return (
     <button
       type="button"
-      className={"favorite " + (es ? "is-favorite" : "")}
+      className={`boton-pastilla ${className}`.trim()}
       aria-pressed={es}
-      aria-label={es ? `Quitar ${nombre} de favoritos` : `Añadir ${nombre} a favoritos`}
+      title={es ? `Quitar ${nombre} de tus municipios` : `Guardar ${nombre} en tus municipios`}
       onClick={() => {
-        const next = es ? favs.filter((x) => x !== slug) : [...favs, slug];
-        setFavs(next);
-        guardar(next);
+        const siguiente = es ? leer().filter((x) => x !== slug) : [...leer().filter((x) => x !== slug), slug];
+        setFavs(siguiente);
+        guardar(siguiente);
       }}
     >
-      <Star size={19} fill={es ? "currentColor" : "none"} />
+      <Estrella llena={es} />
+      {es ? "Guardado en tus municipios" : "Guardar en tus municipios"}
     </button>
   );
 }
 
-type Item = { nombre: string; slug: string };
+type Item = { nombre: string; slug: string; temp?: number | null };
+
+// Enlaces en pastilla a los municipios guardados ("Almería 24°"). Sin favoritos, muestra `porDefecto`.
 export function RinconesRapidos({ municipios, porDefecto, base }: { municipios: Item[]; porDefecto: string[]; base: string }) {
   const [favs, setFavs] = useState<string[]>([]);
   useEffect(() => setFavs(leer()), []);
   const slugs = favs.length ? favs : porDefecto;
   const lista = slugs.map((s) => municipios.find((m) => m.slug === s)).filter((m): m is Item => Boolean(m));
   return (
-    <nav className="quick-places" aria-label={favs.length ? "Tus municipios favoritos" : "Municipios destacados"}>
-      <span>{favs.length ? "TUS RINCONES" : "DESTACADOS"}</span>
-      {lista.map((m) => (
-        <a key={m.slug} href={`${base}${m.slug}/`}>
-          {m.nombre}
-          {favs.includes(m.slug) && <Star size={11} fill="currentColor" aria-hidden="true" />}
-        </a>
-      ))}
+    <nav aria-label={favs.length ? "Tus municipios" : "Municipios destacados"}>
+      <ul className="flex flex-wrap gap-2" role="list">
+        {lista.map((m) => (
+          <li key={m.slug}>
+            <a className="boton-pastilla" href={`${base}${m.slug}/`}>
+              {m.nombre}
+              {m.temp != null && Number.isFinite(m.temp) ? ` ${Math.round(m.temp)}°` : ""}
+            </a>
+          </li>
+        ))}
+      </ul>
     </nav>
   );
 }

@@ -1,102 +1,259 @@
 ---
-// Tarjeta principal (estado actual) + "El día en un vistazo". Se usa en la portada y en cada municipio.
-import { ArrowDown, ArrowUp, CloudRain, Droplets, MapPin, Sun, Sunrise, Sunset, Wind } from "lucide-react";
+// "Ahora" de un municipio: temperatura, estado del cielo y datos clave (viento, rachas, humedad, sol).
+// - titular: cabecera de la página de municipio (h1 enorme, altitud y botón "Guardar en tus municipios").
+// - sin titular: bloque "Ahora en {municipio}" (portada), con enlace opcional a su página.
 import IconoCielo from "./IconoCielo";
 import { BotonFavorito } from "./Favoritos";
 import type { Municipio } from "../lib/datos";
 import { fmt, rumbo, type Prevision } from "../lib/tiempo";
 
-type Props = { municipio: Municipio; prevision: Prevision; titular?: boolean; enlace?: string };
-const { municipio: m, prevision: p, titular = false, enlace } = Astro.props;
+type Props = {
+  municipio: Municipio;
+  prevision: Prevision;
+  titular?: boolean;
+  enlace?: string;
+  // Texto bajo el h1 (titular). Por defecto, la altitud.
+  subtitulo?: string;
+};
+const { municipio: m, prevision: p, titular = false, enlace, subtitulo } = Astro.props;
 const a = p.actual;
-const hoy = p.dias[0];
-const Titulo = titular ? "h1" : "h2";
+// El día de la hora "ahora" (si los datos van con retraso, p.dias[0] puede ser un día pasado)
+const hoy = (a && p.dias.find((d) => d.fecha === a.t.slice(0, 10))) ?? p.dias[0];
+const hora = a?.t.slice(11, 16);
+const RACHA_DESTACADA = 20;
+const altitud = `${String(Math.round(m.altitud)).replace(/\B(?=(\d{3})+(?!\d))/g, ".")} m de altitud`;
+const sub = subtitulo ?? (m.id === "04013" ? `Capital de la provincia, ${altitud}` : `Provincia de Almería, ${altitud}`);
+const viento = a?.viento != null ? `${fmt(a.viento)} km/h${a.dir != null ? ` ${rumbo(a.dir)}` : ""}` : "—";
+const sol = hoy?.orto && hoy?.ocaso ? `${hoy.orto} a ${hoy.ocaso}` : "—";
+const hoyTexto = hoy && (hoy.max != null || hoy.min != null) ? `Hoy, máxima ${fmt(hoy.max, "°")} y mínima ${fmt(hoy.min, "°")}.` : "";
+const idTitulo = titular ? "titulo-municipio" : `titulo-ahora-${m.slug}`;
 ---
 
-<section class="overview" aria-label={`Tiempo ahora en ${m.nombre}`}>
-  <div class:list={["hero-card", { "is-night": a?.noche }]}>
-    <div class="hero-landscape" aria-hidden="true">
-      <div class="land-sun"></div>
-      <svg viewBox="0 0 900 460" preserveAspectRatio="none">
-        <path d="M0 370 L160 282 225 312 340 211 415 220 550 100 610 152 670 122 820 255 900 240 900 460 0 460" fill="#73948e" opacity=".45"></path>
-        <path d="M0 410L210 345 350 380 485 287 570 330 650 222 730 248 900 360 900 460 0 460" fill="#3d706c" opacity=".65"></path>
-        <path d="M0 445Q210 347 410 420T900 383V460H0" fill="#164e55"></path>
-        <path d="M0 456Q260 419 460 453T900 422V460H0" fill="#123d48"></path>
-      </svg>
-    </div>
-    <div class="hero-top">
-      <span class="location-label"><MapPin size={14} aria-hidden="true" />Almería · {m.altitud} m de altitud</span>
-      <BotonFavorito client:idle slug={m.slug} nombre={m.nombre} />
-    </div>
-    <Titulo>
-      {titular ? <>El tiempo en {m.nombre}<small>Previsión por horas y próximos 7 días</small></> : m.nombre}
-    </Titulo>
-    {!titular && <p class="hero-tagline">Capital de la provincia</p>}
-    <div class="main-weather">
-      <span class="temperature">{fmt(a?.temp)}<sup>°</sup></span>
-      <div>
-        {a && <IconoCielo cielo={a.cielo} noche={a.noche} size={48} />}
-        <p>{a ? a.cieloTxt : "Previsión no disponible"}</p>
-        {
-          a && (
-            <small>
-              Sensación de {fmt(a.sens, "°")} <span aria-hidden="true">·</span>
-              <ArrowUp size={12} aria-hidden="true" /><span class="sr-only">Máxima</span>{fmt(hoy?.max, "°")}
-              <ArrowDown size={12} aria-hidden="true" /><span class="sr-only">Mínima</span>{fmt(hoy?.min, "°")}
-            </small>
-          )
-        }
+{
+  titular ? (
+    <section class="resumen" aria-labelledby={idTitulo}>
+      <h1 id={idTitulo} class="titular titular-1 resumen-titulo">{m.nombre}</h1>
+      <div class="resumen-pie">
+        <p class="resumen-sub">{sub}</p>
+        <BotonFavorito client:idle slug={m.slug} nombre={m.nombre} className="resumen-favorito" />
       </div>
-    </div>
-    <div class="hero-bottom">
-      <span>
-        <span class:list={["live-dot", { fallback: !p.aemet }]}></span>
-        {p.aemet ? "Previsión AEMET + modelo Open-Meteo" : "Previsión del modelo Open-Meteo"}
-        {a && ` · ${a.t.slice(11, 16)} h`}
-      </span>
-      {enlace && <a class="text-link" style="margin:0;color:inherit" href={enlace}>Previsión completa →</a>}
-    </div>
-  </div>
+      <div class="resumen-ahora" data-solo-general>
+        <span class="cifra-gigante">
+          <span class="sr-only">Ahora, </span>
+          {fmt(a?.temp, "°")}
+        </span>
+        <div class="resumen-cielo">
+          {a ? (
+            <>
+              <span class="resumen-estado">
+                <IconoCielo cielo={a.cielo} noche={a.noche} size={28} />
+                <span>
+                  {a.cieloTxt} <span class="resumen-hora">a las {hora}</span>
+                </span>
+              </span>
+              <span class="texto-secundario resumen-sens">Sensación de {fmt(a.sens, "°")}.</span>
+              {hoyTexto && <span class="texto-secundario resumen-hoy">{hoyTexto}</span>}
+            </>
+          ) : (
+            <span class="resumen-estado">Previsión no disponible</span>
+          )}
+        </div>
+      </div>
+      <dl class="datos-clave resumen-datos" data-solo-general>
+        <div>
+          <dt>Viento</dt>
+          <dd>{viento}</dd>
+        </div>
+        <div>
+          <dt>Rachas</dt>
+          <dd class:list={{ "texto-almagra": (a?.racha ?? 0) > RACHA_DESTACADA }}>{a?.racha != null ? `${fmt(a.racha)} km/h` : "—"}</dd>
+        </div>
+        <div>
+          <dt>Humedad</dt>
+          <dd>{fmt(a?.hum, " %")}</dd>
+        </div>
+        <div>
+          <dt>Sol</dt>
+          <dd>{sol}</dd>
+        </div>
+      </dl>
+    </section>
+  ) : (
+    <section class="resumen-portada" aria-labelledby={idTitulo}>
+      <div class="resumen-portada-ahora">
+        <h2 id={idTitulo} class="resumen-portada-titulo">
+          Ahora en {m.nombre}
+          {hora && `, ${hora}`}
+        </h2>
+        <div class="flex items-center gap-5">
+          <span class="cifra-gigante">{fmt(a?.temp, "°")}</span>
+          <div class="flex flex-col gap-1 text-lg">
+            {a ? (
+              <span class="flex items-center gap-2">
+                <IconoCielo cielo={a.cielo} noche={a.noche} size={28} />
+                {a.cieloTxt}
+              </span>
+            ) : (
+              <span>Previsión no disponible</span>
+            )}
+            {hoy && (
+              <span class="texto-secundario">
+                Máxima {fmt(hoy.max, "°")}, mínima {fmt(hoy.min, "°")}
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+      <dl class="datos-clave resumen-portada-datos">
+        <div>
+          <dt>Viento</dt>
+          <dd>{viento}</dd>
+        </div>
+        <div>
+          <dt>Rachas</dt>
+          <dd>{a?.racha != null ? `${fmt(a.racha)} km/h` : "—"}</dd>
+        </div>
+        <div>
+          <dt>Humedad</dt>
+          <dd>{fmt(a?.hum, " %")}</dd>
+        </div>
+        <div>
+          <dt>Lluvia hoy</dt>
+          <dd class="texto-lluvia">{fmt(hoy?.prob, " %")}</dd>
+        </div>
+      </dl>
+      {
+        enlace && (
+          <a class="boton" href={enlace}>
+            Ver {m.nombre} hora a hora
+          </a>
+        )
+      }
+    </section>
+  )
+}
 
-  <div class="conditions">
-    <div class="conditions-title"><h2>El día en un vistazo</h2><span class="tiny-label">HORA PENINSULAR</span></div>
-    <div class="condition-grid">
-      <article>
-        <Wind size={21} aria-hidden="true" />
-        <h3>Viento</h3>
-        <strong>{fmt(a?.viento)}<small> km/h</small></strong>
-        <p>
-          {
-            a?.dir != null && (
-              <ArrowDown size={12} className="wind-arrow" style={{ transform: `rotate(${a.dir}deg)` }} aria-hidden="true" />
-            )
-          }
-          {rumbo(a?.dir ?? null)} · rachas de {fmt(a?.racha)} km/h
-        </p>
-      </article>
-      <article>
-        <Droplets size={21} aria-hidden="true" />
-        <h3>Humedad</h3>
-        <strong>{fmt(a?.hum)}<small> %</small></strong>
-        <p>Humedad relativa</p>
-      </article>
-      <article>
-        <Sun size={21} aria-hidden="true" />
-        <h3>Índice UV</h3>
-        <strong>{fmt(hoy?.uv)}<small> / 11+</small></strong>
-        <p>Máximo previsto del día</p>
-      </article>
-      <article>
-        <CloudRain size={21} aria-hidden="true" />
-        <h3>Lluvia</h3>
-        <strong>{fmt(hoy?.prob)}<small> %</small></strong>
-        <p>Probabilidad máxima de hoy</p>
-      </article>
-    </div>
-    <div class="sun-times">
-      <span><Sunrise size={18} aria-hidden="true" /> Amanecer <b>{hoy?.orto ?? "—"}</b></span>
-      <span class="sun-line"></span>
-      <span><Sunset size={18} aria-hidden="true" /> Atardecer <b>{hoy?.ocaso ?? "—"}</b></span>
-    </div>
-  </div>
-</section>
+<style>
+  /* --- Cabecera del municipio. Móvil (Movil.dc.html): título, altitud, ahora, datos y botón a lo ancho --- */
+  .resumen {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "titulo" "sub" "ahora" "datos" "favorito";
+    gap: 14px;
+  }
+  .resumen-titulo {
+    grid-area: titulo;
+    margin: 0;
+  }
+  /* En móvil sus hijos se colocan en la rejilla; en escritorio van juntos bajo el título */
+  .resumen-pie {
+    display: contents;
+  }
+  .resumen-sub {
+    grid-area: sub;
+    margin: 0;
+    font-size: 16px;
+  }
+  .resumen-pie :global(.resumen-favorito) {
+    grid-area: favorito;
+    justify-content: center;
+    min-height: 48px;
+    border-radius: 24px;
+    font-size: 16px;
+  }
+  .resumen-ahora {
+    grid-area: ahora;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+  .resumen-cielo {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-size: 16px;
+  }
+  .resumen-estado {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 700;
+  }
+  /* En móvil la hora y "Hoy, máxima…" se abrevian como en la maqueta */
+  .resumen-hora {
+    font-weight: 400;
+  }
+  .resumen-datos {
+    grid-area: datos;
+    margin: 0;
+  }
+  @media (max-width: 47.99rem) {
+    .resumen-hora {
+      display: none;
+    }
+  }
+
+  /* Escritorio (Municipio.dc.html): título a la izquierda, ahora y datos a la derecha, alineados abajo */
+  @media (min-width: 48rem) {
+    .resumen {
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      grid-template-areas: "titulo ahora" "pie datos";
+      gap: 16px 56px;
+      align-items: end;
+      margin-top: -24px;
+    }
+    .resumen-pie {
+      grid-area: pie;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 12px 24px;
+      align-self: start;
+    }
+    .resumen-sub {
+      font-size: 17px;
+    }
+    .resumen-pie :global(.resumen-favorito) {
+      min-height: 44px;
+      border-radius: 22px;
+      font-size: 15px;
+    }
+    .resumen-ahora {
+      gap: 24px;
+    }
+    .resumen-cielo {
+      gap: 4px;
+      font-size: 18px;
+    }
+    .resumen-estado {
+      gap: 10px;
+    }
+  }
+  /* Si la vista por zonas oculta "ahora" y los datos, el título ocupa todo el ancho */
+  @media (min-width: 48rem) {
+    .resumen:has(.resumen-ahora[hidden]) {
+      grid-template-columns: minmax(0, 1fr);
+      grid-template-areas: "titulo" "pie";
+    }
+  }
+
+  /* --- Bloque "Ahora en …" de la portada --- */
+  .resumen-portada {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 24px 48px;
+  }
+  .resumen-portada-ahora {
+    flex: 1 1 320px;
+  }
+  .resumen-portada-titulo {
+    margin: 0 0 8px;
+    font-size: 18px;
+    font-weight: 600;
+  }
+  .resumen-portada-datos {
+    flex: 2 1 520px;
+    margin: 0;
+  }
+</style>

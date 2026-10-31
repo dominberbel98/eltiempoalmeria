@@ -1,0 +1,224 @@
+---
+// "Esta semana": un día por fila con cielo, barra mínima–máxima (escala común de la semana),
+// probabilidad de lluvia, rachas y, si AEMET la da, probabilidad de tormenta.
+import { diaConNumero, fmt, type Dia } from "../lib/tiempo";
+
+// `hoy`: fecha local "YYYY-MM-DD" que se rotula como "Hoy"
+type Props = { dias: Dia[]; titulo?: string; hoy?: string };
+const { dias, titulo = "Esta semana", hoy } = Astro.props;
+
+const LLUVIA_DESTACADA = 70; // % : fila en fondo de mar
+const LLUVIA_FUERTE = 40; // % : cifra en negrita
+const RACHA_DESTACADA = 30; // km/h
+const TORMENTA_MINIMA = 10; // % : por debajo no se menciona
+
+const mins = dias.map((d) => d.min).filter((x): x is number => x != null);
+const maxs = dias.map((d) => d.max).filter((x): x is number => x != null);
+const bajo = mins.length ? Math.min(...mins) : 0;
+const alto = maxs.length ? Math.max(...maxs) : 1;
+const rango = Math.max(1, alto - bajo);
+const pct = (v: number) => Math.round(((v - bajo) / rango) * 1000) / 10;
+
+const filas = dias.map((d) => {
+  const esHoy = d.fecha === hoy;
+  const largo = esHoy ? "Hoy" : diaConNumero(d.fecha);
+  const corto = esHoy ? "Hoy" : diaConNumero(d.fecha, true);
+  const barra =
+    d.min != null && d.max != null ? `left:${pct(Math.min(d.min, d.max))}%;right:${Math.round((100 - pct(Math.max(d.min, d.max))) * 10) / 10}%` : null;
+  const prob = d.prob;
+  const tormenta = d.tormentaMax != null && d.tormentaMax >= TORMENTA_MINIMA ? d.tormentaMax : null;
+  return {
+    d,
+    largo,
+    corto,
+    barra,
+    lluviosa: prob != null && prob >= LLUVIA_DESTACADA,
+    fuerte: prob != null && prob >= LLUVIA_FUERTE,
+    rachaFuerte: d.racha != null && d.racha >= RACHA_DESTACADA,
+    tormenta,
+  };
+});
+const idTitulo = "titulo-semana";
+---
+
+<section class="semana" aria-labelledby={idTitulo}>
+  <h2 id={idTitulo} class="titular titular-2">{titulo}</h2>
+  <ol class="semana-lista" role="list">
+    {
+      filas.map((f) => (
+        <li class:list={["semana-dia", { "fila-lluviosa": f.lluviosa, "semana-dia-marcado": f.lluviosa }]}>
+          <span class="titular titular-4 semana-nombre">
+            <span class="semana-largo">{f.largo}</span>
+            <span class="semana-corto" aria-hidden="true">
+              {f.corto}
+            </span>
+          </span>
+          <span class="semana-cielo">
+            {f.d.cieloTxt}
+            {f.tormenta != null && <span class="semana-tormenta">Tormenta: {f.tormenta} %</span>}
+          </span>
+          <div class="semana-rango">
+            <span class="semana-min">
+              <span class="sr-only">Mínima </span>
+              {fmt(f.d.min, "°")}
+            </span>
+            <div class="barra-rango" aria-hidden="true">
+              {f.barra && <span style={f.barra} />}
+            </div>
+            <span class="semana-max">
+              <span class="sr-only">Máxima </span>
+              {fmt(f.d.max, "°")}
+            </span>
+          </div>
+          <span class:list={["texto-lluvia semana-prob", { "semana-prob-fuerte": f.fuerte, "semana-prob-destacada": f.lluviosa }]}>
+            <span class="sr-only">Probabilidad de lluvia </span>
+            {fmt(f.d.prob, " %")}
+          </span>
+          <span class:list={["semana-racha", { "semana-racha-fuerte": f.rachaFuerte }]}>
+            {f.d.racha != null ? `rachas ${fmt(f.d.racha)}` : "rachas —"}
+            <span class="sr-only"> km/h</span>
+          </span>
+        </li>
+      ))
+    }
+  </ol>
+</section>
+
+<style>
+  .semana {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .semana h2 {
+    margin: 0;
+  }
+  .semana-lista {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    border-bottom: 1px solid var(--color-linea);
+  }
+  /* Móvil (Movil.dc.html): día | barra | lluvia, y debajo el cielo (y las rachas) */
+  .semana-dia {
+    display: grid;
+    grid-template-columns: 96px minmax(0, 1fr) 54px;
+    grid-template-areas: "nombre rango prob" ". cielo cielo" ". racha racha";
+    gap: 4px 12px;
+    align-items: center;
+    padding: 12px 0;
+    border-top: 1px solid var(--color-linea);
+  }
+  .semana-dia-marcado {
+    padding-inline: 6px;
+  }
+  .semana-nombre {
+    grid-area: nombre;
+  }
+  .semana-corto {
+    display: none;
+  }
+  .semana-cielo {
+    grid-area: cielo;
+    font-size: 14px;
+    color: var(--color-ceniza);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0 10px;
+  }
+  .semana-dia-marcado .semana-cielo {
+    color: var(--color-gris-texto);
+  }
+  .semana-tormenta {
+    color: var(--color-almagra-oscuro);
+    font-weight: 700;
+  }
+  .semana-rango {
+    grid-area: rango;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 15px;
+  }
+  .semana-min,
+  .semana-max {
+    min-width: 28px;
+  }
+  .semana-min {
+    text-align: right;
+  }
+  .semana-max {
+    font-weight: 700;
+  }
+  .semana-prob {
+    grid-area: prob;
+    text-align: right;
+  }
+  .semana-prob-fuerte {
+    font-weight: 700;
+  }
+  .semana-prob-destacada {
+    font-weight: 800;
+  }
+  .semana-racha {
+    grid-area: racha;
+    font-size: 14px;
+    color: var(--color-ceniza);
+  }
+  .semana-racha-fuerte {
+    color: var(--color-almagra);
+    font-weight: 700;
+  }
+  @media (max-width: 47.99rem) {
+    .semana-largo {
+      display: none;
+    }
+    .semana-corto {
+      display: inline;
+    }
+    /* Las rachas normales no caben en la fila de móvil: solo se muestran si destacan */
+    .semana-racha:not(.semana-racha-fuerte) {
+      display: none;
+    }
+  }
+
+  /* Escritorio (Municipio.dc.html): día | cielo | barra | lluvia | rachas en una fila */
+  @media (min-width: 48rem) {
+    .semana {
+      gap: 12px;
+    }
+    .semana-dia {
+      grid-template-columns: 160px minmax(160px, 220px) minmax(200px, 1fr) 90px 110px;
+      grid-template-areas: "nombre cielo rango prob racha";
+      gap: 20px;
+      padding: 14px 0;
+    }
+    .semana-dia-marcado {
+      padding-inline: 8px;
+    }
+    .semana-cielo {
+      font-size: 16px;
+      color: var(--color-basalto);
+      flex-direction: column;
+    }
+    .semana-dia-marcado .semana-cielo {
+      color: var(--color-basalto);
+    }
+    .semana-tormenta {
+      font-size: 14px;
+    }
+    .semana-rango {
+      gap: 12px;
+      font-size: 16px;
+    }
+    .semana-prob {
+      text-align: left;
+    }
+    .semana-prob-destacada {
+      font-size: 20px;
+    }
+    .semana-racha {
+      font-size: 16px;
+    }
+  }
+</style>
