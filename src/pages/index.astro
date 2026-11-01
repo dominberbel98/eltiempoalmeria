@@ -6,6 +6,7 @@ import Buscador from "../components/Buscador";
 import MapaProvincia, { capaPorDefecto, elegirDestacados, redondearCapa } from "../components/MapaProvincia";
 import TusMunicipios from "../components/TusMunicipios";
 import IconoCielo from "../components/IconoCielo";
+import AvisosBanda from "../components/AvisosBanda.astro";
 import { getMeta } from "../lib/datos";
 import { fichas, sinAemet } from "../lib/resumen";
 import { fmt, rumbo, ZONA } from "../lib/tiempo";
@@ -77,6 +78,8 @@ const jsonLd = {
   ancho="completo"
 >
   <div slot="buscador"><Buscador client:idle base={base} version={meta.updatedAt} /></div>
+
+  <AvisosBanda ancho="completo" />
 
   <section class="banda-oscura" aria-labelledby="mp-titulo">
     <div class="contenedor">
