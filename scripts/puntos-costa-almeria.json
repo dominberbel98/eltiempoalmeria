@@ -1,0 +1,12 @@
+[
+  { "id": "adra", "nombre": "Adra", "municipio": "04003", "lat": 36.725, "lon": -3.02, "subzonaAemet": 8010412 },
+  { "id": "balerma", "nombre": "Balerma", "municipio": "04902", "lat": 36.708, "lon": -2.885, "subzonaAemet": 8010412 },
+  { "id": "roquetas-de-mar", "nombre": "Roquetas de Mar", "municipio": "04079", "lat": 36.755, "lon": -2.59, "subzonaAemet": 8010412 },
+  { "id": "almeria", "nombre": "Almería", "municipio": "04013", "lat": 36.815, "lon": -2.465, "subzonaAemet": 8010412 },
+  { "id": "cabo-de-gata", "nombre": "Cabo de Gata", "municipio": "04013", "lat": 36.705, "lon": -2.195, "subzonaAemet": 8010412 },
+  { "id": "san-jose", "nombre": "San José", "municipio": "04066", "lat": 36.75, "lon": -2.1, "subzonaAemet": 8010411 },
+  { "id": "carboneras", "nombre": "Carboneras", "municipio": "04032", "lat": 36.99, "lon": -1.875, "subzonaAemet": 8010411 },
+  { "id": "mojacar", "nombre": "Mojácar", "municipio": "04064", "lat": 37.125, "lon": -1.805, "subzonaAemet": 8010411 },
+  { "id": "garrucha", "nombre": "Garrucha", "municipio": "04049", "lat": 37.21, "lon": -1.72, "subzonaAemet": 8010411 },
+  { "id": "san-juan-de-los-terreros", "nombre": "San Juan de los Terreros", "municipio": "04075", "lat": 37.35, "lon": -1.65, "subzonaAemet": 8010411 }
+]
