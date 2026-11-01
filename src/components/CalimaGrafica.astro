@@ -1,0 +1,180 @@
+---
+// Gráfica de /calima/: polvo en superficie hora a hora en la provincia (máximo y mediana de los 103 municipios) desde
+// ahora hasta el final de la previsión, con las líneas de los umbrales de calima. SVG estático del build que se estira
+// al ancho (las líneas no engordan: vector-effect) con los rótulos en HTML. La alternativa en tabla es el resumen por
+// días de la página, al que enlaza el pie.
+import { ESCALA_CALIMA, etiquetaDia, fmtPolvo, type HoraProvincia } from "../lib/calima";
+import { diaConNumero } from "../lib/tiempo";
+
+type Props = { serie: HoraProvincia[]; idTabla: string; descripcion: string };
+const { serie, idTabla, descripcion } = Astro.props;
+
+const n = serie.length;
+const valores = serie.flatMap((h) => (h.max != null ? [h.max] : []));
+const pico = valores.length ? Math.max(...valores) : 0;
+// Eje: al menos hasta 60 µg/m³ para que se vean los umbrales de calima débil (20) y moderada (50)
+const tope = Math.max(60, Math.ceil((pico * 1.15) / 10) * 10);
+const y = (v: number) => Math.round((100 - (v / tope) * 100) * 100) / 100;
+const pct = (i: number) => `${((i / Math.max(1, n - 1)) * 100).toFixed(3)}%`;
+
+// Trozos de línea sin huecos (una hora sin dato corta la línea)
+function lineas(valor: (h: HoraProvincia) => number | null): string[] {
+  const trozos: string[] = [];
+  let actual: string[] = [];
+  serie.forEach((h, i) => {
+    const v = valor(h);
+    if (v == null) {
+      if (actual.length > 1) trozos.push(actual.join(" "));
+      actual = [];
+    } else actual.push(`${i},${y(v)}`);
+  });
+  if (actual.length > 1) trozos.push(actual.join(" "));
+  return trozos;
+}
+const lineaMax = lineas((h) => h.max);
+const lineaMediana = lineas((h) => h.mediana);
+
+const umbrales = ESCALA_CALIMA.slice(1)
+  .filter((nv) => nv.desde < tope)
+  .map((nv) => ({ valor: nv.desde, nombre: nv.nombre, top: `${y(nv.desde)}%` }));
+const ahoraLocal = serie[0]?.t ?? "";
+// En móvil, el día abreviado ("Mié 4") para que los rótulos no se pisen
+const corta = (fecha: string, ahora: string) => {
+  const e = etiquetaDia(fecha, ahora);
+  return e === "Hoy" || e === "Mañana" ? e : diaConNumero(fecha, true);
+};
+const medianoches = serie.flatMap((h, i) => (i > 0 && h.t.slice(11, 13) === "00" ? [i] : []));
+const dias = [0, ...medianoches]
+  .map((i, k, arr) => ({ i, ancho: (arr[k + 1] ?? n) - i, etiqueta: etiquetaDia(serie[i].t.slice(0, 10), ahoraLocal), corta: corta(serie[i].t.slice(0, 10), ahoraLocal) }))
+  .filter((d) => d.ancho >= 14);
+---
+
+{
+  n > 1 && (
+    <figure class="panel m-0 flex flex-col gap-4 p-4 md:p-6">
+      <div class="flex flex-wrap gap-x-6 gap-y-1.5 text-sm" aria-hidden="true">
+        <span class="inline-flex items-center gap-2">
+          <span class="inline-block h-[3px] w-6 bg-almagra" />
+          Máximo de la provincia
+        </span>
+        <span class="inline-flex items-center gap-2">
+          <span class="inline-block w-6 border-t-2 border-dashed border-basalto" />
+          Mediana de los 103 municipios
+        </span>
+      </div>
+      <div class="cg" role="img" aria-label={descripcion}>
+        <div class="cg-eje" aria-hidden="true">
+          <span style="top:0%">{tope}</span>
+          {umbrales.map((u) => (
+            <span style={`top:${u.top}`}>{u.valor}</span>
+          ))}
+          <span style="top:100%">0</span>
+        </div>
+        <div class="cg-area" aria-hidden="true">
+          <svg viewBox={`0 0 ${n - 1} 100`} preserveAspectRatio="none" class="absolute inset-0 h-full w-full overflow-visible" focusable="false">
+            {umbrales.map((u) => (
+              <line x1="0" x2={n - 1} y1={y(u.valor)} y2={y(u.valor)} class="cg-umbral" vector-effect="non-scaling-stroke" />
+            ))}
+            <line x1="0" x2={n - 1} y1="100" y2="100" class="cg-base" vector-effect="non-scaling-stroke" />
+            {medianoches.map((i) => (
+              <line x1={i} x2={i} y1="0" y2="100" class="cg-medianoche" vector-effect="non-scaling-stroke" />
+            ))}
+            {lineaMediana.map((p) => (
+              <polyline points={p} class="cg-mediana" vector-effect="non-scaling-stroke" />
+            ))}
+            {lineaMax.map((p) => (
+              <polyline points={p} class="cg-max" vector-effect="non-scaling-stroke" />
+            ))}
+          </svg>
+          {umbrales.map((u) => (
+            <span class="cg-umbral-txt" style={`top:${u.top}`}>
+              {u.nombre}
+            </span>
+          ))}
+        </div>
+        <div />
+        <div class="relative h-6 overflow-hidden text-[13px] font-bold" aria-hidden="true">
+          {dias.map((d) => (
+            <span class="absolute top-1 whitespace-nowrap pl-1.5" style={`left:${pct(d.i)}`}>
+              {d.i === 0 ? (
+                  "Ahora"
+                ) : (
+                  <>
+                    <span class="md:hidden">{d.corta}</span>
+                    <span class="hidden md:inline">{d.etiqueta}</span>
+                  </>
+                )}
+            </span>
+          ))}
+        </div>
+      </div>
+      <figcaption class="nota">
+        Polvo mineral en superficie, en µg/m³, cada hora. Las líneas de puntos marcan dónde empieza cada nivel de calima y las verticales, la
+        medianoche. Pico previsto: {fmtPolvo(pico)}. Los datos por días, en <a href={`#${idTabla}`}>la tabla de la provincia</a>.
+      </figcaption>
+    </figure>
+  )
+}
+
+<style>
+  .cg {
+    display: grid;
+    grid-template-columns: 2.25rem minmax(0, 1fr);
+    column-gap: 8px;
+  }
+  .cg-eje {
+    position: relative;
+    font-size: 13px;
+    color: var(--color-ceniza);
+  }
+  .cg-eje > span {
+    position: absolute;
+    right: 0;
+    transform: translateY(-50%);
+  }
+  .cg-area {
+    position: relative;
+    height: 13rem;
+  }
+  @media (min-width: 48rem) {
+    .cg-area {
+      height: 16rem;
+    }
+  }
+  .cg-umbral {
+    stroke: var(--color-ceniza);
+    stroke-width: 1;
+    stroke-dasharray: 2 4;
+  }
+  .cg-base {
+    stroke: var(--color-linea);
+    stroke-width: 1;
+  }
+  .cg-medianoche {
+    stroke: var(--color-linea);
+    stroke-width: 1.5;
+  }
+  .cg-max {
+    fill: none;
+    stroke: var(--color-almagra);
+    stroke-width: 3;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+  }
+  .cg-mediana {
+    fill: none;
+    stroke: var(--color-basalto);
+    stroke-width: 2;
+    stroke-dasharray: 6 4;
+    stroke-linejoin: round;
+  }
+  .cg-umbral-txt {
+    position: absolute;
+    right: 4px;
+    transform: translateY(-115%);
+    font-size: 13px;
+    color: var(--color-ceniza);
+    background: var(--color-blanco);
+    padding: 0 4px;
+  }
+</style>

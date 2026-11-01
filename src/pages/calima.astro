@@ -1,0 +1,233 @@
+---
+// /calima/: previsión de polvo en suspensión (CAMS, a través de Open-Meteo) para los 103 municipios: mapa por días
+// coloreado por el nivel máximo, evolución hora a hora en la provincia, tabla por municipio y día, y qué es la calima
+// y cómo se leen los niveles.
+import Base from "../layouts/Base.astro";
+import CalimaGrafica from "../components/CalimaGrafica.astro";
+import CalimaMapa from "../components/CalimaMapa.astro";
+import CalimaTabla from "../components/CalimaTabla.astro";
+import {
+  ATRIBUCION_CAMS,
+  ESCALA_CALIMA,
+  FUENTE_UMBRALES,
+  NOTA_CALIMA,
+  fmtAod,
+  fmtPolvo,
+  fuenteCalima,
+  getCalima,
+  municipiosCalima,
+  picoProvincial,
+  resumenCalima,
+  serieProvincial,
+  textoAod,
+} from "../lib/calima";
+
+const base = import.meta.env.BASE_URL;
+const ahora = new Date();
+const calima = getCalima();
+const municipios = municipiosCalima(ahora, calima);
+const resumen = resumenCalima(municipios);
+const serie = serieProvincial(municipios);
+const pico = picoProvincial(municipios);
+const fuente = fuenteCalima(ahora, calima);
+const hoy = resumen.dias[0] ?? null;
+const conDatos = resumen.dias.length > 0;
+
+// Espesor óptico máximo de cada día en la provincia (turbidez del cielo, orientativo)
+const aodDia = new Map(
+  resumen.dias.map((d) => {
+    const v = municipios.flatMap((m) => {
+      const x = m.dias.find((y) => y.fecha === d.fecha)?.aodMax;
+      return x != null ? [x] : [];
+    });
+    return [d.fecha, v.length ? Math.max(...v) : null];
+  })
+);
+const descripcionGrafica = pico
+  ? `Gráfica del polvo en superficie en la provincia hora a hora. El pico previsto es de ${fmtPolvo(pico.valor)} en ${pico.nombre} ${pico.texto}.`
+  : "Gráfica del polvo en superficie en la provincia hora a hora.";
+
+const descripcion =
+  "Previsión de calima y polvo sahariano en suspensión para los 103 municipios de Almería en los próximos días: mapa por niveles, evolución por horas y tabla por municipio.";
+const jsonLd = {
+  "@context": "https://schema.org",
+  "@type": "WebPage",
+  name: "Calima en Almería: previsión de polvo en suspensión",
+  url: new URL(`${base}calima/`, Astro.site).href,
+  inLanguage: "es-ES",
+  description: descripcion,
+};
+---
+
+<Base title="Calima en Almería: previsión de polvo en suspensión" description={descripcion} jsonLd={jsonLd}>
+  <section aria-labelledby="t-calima" class="flex flex-wrap items-end gap-x-14 gap-y-8">
+    <div class="flex flex-[1_1_480px] flex-col gap-3.5">
+      <h1 id="t-calima" class="titular text-[clamp(3.5rem,2.4rem+3.6vw,5.5rem)] leading-[0.88]">Calima en Almería</h1>
+      <p class="max-w-[52ch] text-lg leading-normal text-gris-texto">
+        {resumen.frase ?? "Previsión del polvo en suspensión para los 103 municipios de la provincia."}
+      </p>
+    </div>
+    {
+      hoy?.max && hoy.infoMax && (
+        <div class="sobre-oscuro flex flex-[1_1_360px] flex-col gap-1.5 rounded-[4px] bg-basalto px-7 py-6">
+          <p class="text-suave-oscuro">Polvo máximo hoy en la provincia</p>
+          <p class="titular text-[clamp(4.5rem,3.8rem+2.4vw,6rem)] leading-[0.9]">
+            {fmtPolvo(hoy.max.valor, false)}
+            <span class="text-4xl"> µg/m³</span>
+          </p>
+          <p class="text-lg font-bold">{hoy.infoMax.nombre}</p>
+          <p class="leading-normal text-texto-oscuro">
+            En {hoy.max.nombre}. {hoy.infoMax.descripcion}
+          </p>
+        </div>
+      )
+    }
+  </section>
+
+  {
+    fuente.desfasado && conDatos && (
+      <p class="aviso">
+        <span>
+          <strong>La previsión puede no estar al día:</strong> la última descarga es del {fuente.actualizadoTexto}.
+        </span>
+      </p>
+    )
+  }
+
+  {
+    !conDatos ? (
+      <p class="aviso">
+        <span>
+          Ahora mismo no hay previsión de polvo. Cuando se pueda descargar, aparecerán aquí el mapa por días y la tabla de los 103
+          municipios.
+        </span>
+      </p>
+    ) : (
+      <>
+        <section aria-labelledby="t-mapa-calima" class="flex flex-col gap-4">
+          <div class="flex flex-wrap items-baseline justify-between gap-3">
+            <h2 id="t-mapa-calima" class="titular titular-2">Mapa por días</h2>
+            <p class="max-w-[60ch] text-[15px] text-ceniza">
+              Cada municipio, con el nivel de su hora con más polvo. {resumen.dias.length} días de previsión.
+            </p>
+          </div>
+          <CalimaMapa municipios={municipios} dias={resumen.dias} idTabla="tabla-municipios" />
+        </section>
+
+        <section aria-labelledby="t-evolucion" class="flex flex-col gap-4">
+          <h2 id="t-evolucion" class="titular titular-2">Hora a hora en la provincia</h2>
+          <CalimaGrafica serie={serie} idTabla="tabla-provincia" descripcion={descripcionGrafica} />
+          <div class="tabla-desplazable" tabindex="0" role="region" aria-labelledby="tabla-provincia-titulo" id="tabla-provincia">
+            <table class="tabla min-w-[720px] [&_td]:whitespace-nowrap [&_td]:py-1 [&_tbody_th]:py-1">
+              <caption id="tabla-provincia-titulo" class="sr-only">
+                Resumen de la calima por días en la provincia
+              </caption>
+              <thead>
+                <tr>
+                  <th scope="col">Día</th>
+                  <th scope="col">Nivel más alto</th>
+                  <th scope="col" class="num">Polvo máximo</th>
+                  <th scope="col">Dónde</th>
+                  <th scope="col" class="num">Municipios con calima</th>
+                  <th scope="col">Cielo (espesor óptico)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {resumen.dias.map((d) => {
+                  const aod = aodDia.get(d.fecha) ?? null;
+                  return (
+                    <tr class={d.nivelMax && d.nivelMax !== "sin" ? "destacada" : undefined}>
+                      <th scope="row">{d.etiqueta}</th>
+                      <td>
+                        {d.infoMax ? (
+                          <span class="inline-flex items-center gap-2">
+                            <span class={`inline-block size-3 rounded-[2px] ${d.infoMax.borde ? "border border-ceniza" : ""}`} style={`background:${d.infoMax.fondo}`} aria-hidden="true" />
+                            {d.infoMax.nombre}
+                          </span>
+                        ) : (
+                          "—"
+                        )}
+                      </td>
+                      <td class="num font-bold">{fmtPolvo(d.max?.valor)}</td>
+                      <td>{d.max ? d.max.slug ? <a href={`${base}${d.max.slug}/`} class="inline-flex min-h-[44px] items-center">{d.max.nombre}</a> : d.max.nombre : "—"}</td>
+                      <td class="num">{d.conCalima.length}</td>
+                      <td>{aod == null ? "—" : `${textoAod(aod)} (${fmtAod(aod)})`}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <p class="nota">
+            Municipios con calima: los que pasan de {ESCALA_CALIMA[0].hasta} µg/m³ en algún momento del día. El espesor óptico mide cuánto apagan la luz
+            del sol el polvo y las demás partículas en toda la columna de aire: con polvo en altura el cielo se ve turbio aunque abajo haya poco.
+          </p>
+        </section>
+
+        <section aria-labelledby="t-municipios-calima" class="flex flex-col gap-4">
+          <div class="flex flex-wrap items-baseline justify-between gap-3">
+            <h2 id="t-municipios-calima" class="titular titular-2">Calima por municipio</h2>
+            <p class="max-w-[60ch] text-[15px] text-ceniza">Polvo máximo de cada día en µg/m³ y su nivel. Enlaza a la previsión del municipio.</p>
+          </div>
+          <CalimaTabla municipios={municipios} dias={resumen.dias} id="tabla-municipios" />
+        </section>
+      </>
+    )
+  }
+
+  <section aria-labelledby="t-que-es" class="flex flex-col gap-5">
+    <h2 id="t-que-es" class="titular titular-2">Qué es la calima</h2>
+    <div class="grid grid-cols-1 gap-x-12 gap-y-6 lg:grid-cols-[minmax(0,5fr)_minmax(0,6fr)]">
+      <div class="flex flex-col gap-3">
+        <p class="texto-largo">
+          Es polvo muy fino, casi siempre del Sáhara, que el viento levanta y trae en suspensión. Con calima el cielo se vuelve blanquecino o
+          amarillento, se ve menos a lo lejos y, si llueve, el agua deja barro en coches y ventanas.
+        </p>
+        <p class="texto-largo">
+          Por su cercanía al norte de África, Almería es de las provincias que más episodios recibe. Pueden darse en cualquier época del año
+          y suelen durar de uno a tres días.
+        </p>
+        <p class="texto-largo">
+          La previsión da el polvo mineral en superficie, en microgramos por metro cúbico de aire (µg/m³), y aquí se toma la hora con más
+          polvo de cada día.
+        </p>
+      </div>
+      <div class="flex flex-col gap-3">
+        <h3 class="titular titular-4">Los niveles</h3>
+        <ul class="m-0 flex list-none flex-col p-0">
+          {
+            ESCALA_CALIMA.map((n) => (
+              <li class="grid grid-cols-[2.25rem_minmax(0,1fr)] items-start gap-x-3 gap-y-0.5 border-t border-linea py-3">
+                <span class={`mt-0.5 inline-block h-5 w-9 rounded-[2px] ${n.borde ? "border border-ceniza" : ""}`} style={`background:${n.fondo}`} aria-hidden="true" />
+                <span class="flex flex-col gap-0.5">
+                  <span>
+                    <strong>{n.nombre}</strong> <span class="text-ceniza">({n.rango})</span>
+                  </span>
+                  <span class="text-[15px] leading-normal text-gris-texto">{n.descripcion}</span>
+                </span>
+              </li>
+            ))
+          }
+        </ul>
+        <p class="nota">{FUENTE_UMBRALES}</p>
+      </div>
+    </div>
+    <p class="nota max-w-[100ch]">{NOTA_CALIMA}</p>
+  </section>
+
+  <section aria-labelledby="t-fuentes-calima" class="flex flex-wrap gap-x-12 gap-y-4 border-t border-linea pt-6 text-[15px] leading-relaxed text-gris-texto">
+    <h2 id="t-fuentes-calima" class="m-0 flex-[0_0_200px] text-lg font-bold text-basalto">De dónde salen los datos</h2>
+    <div class="grid flex-[1_1_360px] grid-cols-[repeat(auto-fit,minmax(min(100%,360px),1fr))] gap-x-12 gap-y-3">
+      <p class="m-0 max-w-[62ch]">
+        Previsión del Servicio de Vigilancia Atmosférica de <a href="https://atmosphere.copernicus.eu/">Copernicus (CAMS)</a>, descargada de
+        la API de calidad del aire de <a href="https://open-meteo.com/">Open-Meteo</a> para las coordenadas de cada municipio. {fuente.fraseModelos}
+      </p>
+      <p class="m-0 max-w-[62ch]">
+        Última descarga: {fuente.actualizadoTexto}. El modelo europeo de CAMS se renueva una vez al día y el global, dos; esta página recoge cada pasada nueva cuando se publica.
+        {pico && ` La hora con más polvo de toda la previsión es ${pico.texto}, en ${pico.nombre} (${fmtPolvo(pico.valor)}).`}
+      </p>
+    </div>
+  </section>
+
+  <p slot="pie">{ATRIBUCION_CAMS}</p>
+</Base>

@@ -1,0 +1,106 @@
+---
+// Tabla "Ahora en la costa" de /mar/: los 10 puntos de oeste a este con la ola de esta hora (altura, estado,
+// procedencia y periodo), el mar de fondo, el viento sobre el mar, el agua y la ola más alta de las próximas 72 h.
+// Cada punto enlaza a su detalle hora a hora (#punto-{id}, en MarDetalle).
+import MarFlecha from "./MarFlecha.astro";
+import { colorOla, estadoMar, etiquetaDia, fmtAgua, fmtAltura, fmtPeriodo, fmtVientoMar, horaDe, procedencia, rumboCorto, type PuntoMarPagina } from "../lib/mar";
+
+type Props = { puntos: PuntoMarPagina[] };
+const { puntos } = Astro.props;
+
+// "hoy, 15:00", "martes 3, 03:00"
+const cuando = (t: string, ahoraLocal: string) => `${etiquetaDia(t.slice(0, 10), ahoraLocal).toLowerCase()}, ${horaDe(t)}`;
+// La ola redondeada a 1 decimal, como se muestra: así el estado y el color casan con la cifra
+const redondear = (v: number | null | undefined) => (v == null ? null : Math.round(v * 10) / 10);
+// Racha más alta de las próximas 24 h
+const rachaMax24 = (p: PuntoMarPagina) => {
+  const v = p.horas.slice(0, 24).map((h) => h.racha).filter((x): x is number => x != null);
+  return v.length ? Math.max(...v) : null;
+};
+---
+
+<div class="tabla-desplazable" tabindex="0" role="region" aria-label="Tabla del estado de la mar ahora en cada punto de la costa">
+  <table class="tabla min-w-[980px] [&_td]:whitespace-nowrap">
+    <caption class="sr-only">Estado de la mar ahora y ola más alta de las próximas 72 horas en cada punto de la costa, de oeste a este</caption>
+    <thead>
+      <tr>
+        <th scope="col">Punto</th>
+        <th scope="col">Ola ahora</th>
+        <th scope="col">Viene del</th>
+        <th scope="col" class="num">Periodo</th>
+        <th scope="col">Mar de fondo</th>
+        <th scope="col">Viento</th>
+        <th scope="col" class="num">Racha máx. 24 h</th>
+        <th scope="col" class="num">Agua</th>
+        <th scope="col">Ola más alta en 72 h</th>
+      </tr>
+    </thead>
+    <tbody>
+      {
+        puntos.map((p) => {
+          const h = p.ahora;
+          const ola = redondear(h?.ola);
+          const c = colorOla(ola);
+          const pico = p.olaMax;
+          const cPico = colorOla(redondear(pico?.valor));
+          return (
+            <tr>
+              <th scope="row" class="!py-1.5">
+                <a href={`#punto-${p.id}`} class="inline-flex min-h-[44px] flex-col justify-center">
+                  <span>{p.nombre}</span>
+                  {p.municipio && p.municipio.nombre !== p.nombre && <span class="text-[13px] font-normal text-ceniza">{p.municipio.nombre}</span>}
+                </a>
+              </th>
+              <td>
+                <span class="inline-flex items-center gap-2">
+                  <span class={`inline-block min-w-[3.25rem] rounded-[3px] px-1.5 py-0.5 text-center font-bold ${c?.clase ?? "bg-niebla text-basalto"} ${c?.borde ? "border border-ceniza" : ""}`}>
+                    {fmtAltura(ola)}
+                  </span>
+                  <span>{estadoMar(ola)?.nombre ?? "Sin dato"}</span>
+                </span>
+              </td>
+              <td>
+                <span class="inline-flex items-center gap-1.5">
+                  <MarFlecha grados={h?.olaDir} />
+                  <abbr title={h?.olaDir != null ? `Ola ${procedencia(h.olaDir)}` : undefined} class="no-underline">
+                    {rumboCorto(h?.olaDir)}
+                  </abbr>
+                </span>
+              </td>
+              <td class="num">{fmtPeriodo(h?.olaPeriodo)}</td>
+              <td>
+                {fmtAltura(h?.fondo)}
+                {h?.fondo != null && h.fondoDir != null && <span class="text-ceniza"> del {rumboCorto(h.fondoDir)}</span>}
+                {h?.fondoPeriodo != null && <span class="text-ceniza">, {fmtPeriodo(h.fondoPeriodo)}</span>}
+              </td>
+              <td>
+                <span class="inline-flex items-center gap-1.5">
+                  <MarFlecha grados={h?.vientoDir} />
+                  {fmtVientoMar(h?.viento)}
+                  {h?.vientoDir != null && (
+                    <abbr title={`Viento ${procedencia(h.vientoDir)}`} class="text-ceniza no-underline">
+                      {rumboCorto(h.vientoDir)}
+                    </abbr>
+                  )}
+                </span>
+              </td>
+              <td class="num">{fmtVientoMar(rachaMax24(p))}</td>
+              <td class="num">{fmtAgua(h?.agua)}</td>
+              <td>
+                {pico ? (
+                  <span class="inline-flex items-center gap-2">
+                    <span class={`inline-block size-2.5 rounded-full ${cPico?.borde ? "border border-ceniza" : ""}`} style={`background:${cPico?.fondo}`} aria-hidden="true" />
+                    <strong>{fmtAltura(pico.valor)}</strong>
+                    <span class="text-ceniza">{cuando(pico.t, h?.t ?? pico.t)}</span>
+                  </span>
+                ) : (
+                  "—"
+                )}
+              </td>
+            </tr>
+          );
+        })
+      }
+    </tbody>
+  </table>
+</div>

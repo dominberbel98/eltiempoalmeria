@@ -1,0 +1,247 @@
+---
+// Mapa de /calima/: los 103 términos municipales coloreados por el nivel de calima del día elegido (máximo horario de
+// polvo, ESCALA_CALIMA), con selector de día. Es un SVG estático hecho en el build con los límites del IGN
+// (public/municipios.geojson): cada término lleva en variables CSS (--d0, --d1…) su color de cada día y el selector solo
+// cambia el atributo data-dia del SVG. Sin JS se ve el primer día y el selector no aparece. Debajo, la frase del día
+// y los municipios con calima; los datos de cada municipio están en la tabla de CalimaTabla.
+import polygonClipping from "polygon-clipping";
+import { getMunicipios } from "../lib/datos";
+import { areaPoligonoHa, leerTerminos, type MultiPoligono } from "../lib/geozonas";
+import { ESCALA_CALIMA, fmtPolvo, infoNivel, type DiaProvincia, type MunicipioCalima } from "../lib/calima";
+
+type Props = { municipios: MunicipioCalima[]; dias: DiaProvincia[]; idTabla: string };
+const { municipios, dias, idTabla } = Astro.props;
+
+// --- Geometría: proyección equirrectangular con la escala de longitud a la latitud media de la provincia ---
+const terminos = leerTerminos();
+let lonMin = Infinity,
+  lonMax = -Infinity,
+  latMin = Infinity,
+  latMax = -Infinity;
+for (const mp of terminos.values())
+  for (const pol of mp)
+    for (const [lon, lat] of pol[0]) {
+      if (lon < lonMin) lonMin = lon;
+      if (lon > lonMax) lonMax = lon;
+      if (lat < latMin) latMin = lat;
+      if (lat > latMax) latMax = lat;
+    }
+const MARGEN = 6;
+const ANCHO = 600;
+const kx = Math.cos((((latMin + latMax) / 2) * Math.PI) / 180);
+const escala = (ANCHO - 2 * MARGEN) / ((lonMax - lonMin) * kx || 1);
+const ALTO = Math.round((latMax - latMin) * escala + 2 * MARGEN);
+const proy = (lon: number, lat: number): [number, number] => [
+  Math.round(((lon - lonMin) * kx * escala + MARGEN) * 10) / 10,
+  Math.round(((latMax - lat) * escala + MARGEN) * 10) / 10,
+];
+// Trazo SVG compacto: un decimal y sin puntos repetidos tras el redondeo
+function trazo(mp: MultiPoligono): string {
+  let d = "";
+  for (const pol of mp)
+    for (const anillo of pol) {
+      const pts: [number, number][] = [];
+      for (const [lon, lat] of anillo) {
+        const p = proy(lon, lat);
+        const u = pts[pts.length - 1];
+        if (!u || u[0] !== p[0] || u[1] !== p[1]) pts.push(p);
+      }
+      if (pts.length < 3) continue;
+      d += `M${pts[0][0]} ${pts[0][1]}L${pts.slice(1).map((p) => `${p[0]} ${p[1]}`).join(" ")}Z`;
+    }
+  return d;
+}
+let contorno = "";
+try {
+  // Solo los anillos exteriores grandes: los huecos y las astillas de la unión son rendijas entre términos vecinos
+  const union = polygonClipping.union(...([...terminos.values()] as [MultiPoligono, ...MultiPoligono[]])) as MultiPoligono;
+  contorno = trazo(union.filter((pol) => areaPoligonoHa([pol[0]]) > 100).map((pol) => [pol[0]]));
+} catch {
+  // Sin contorno provincial el mapa sigue funcionando
+}
+
+const SIN_DATO = "#ffffff";
+const fechas = dias.map((d) => d.fecha);
+const formas = municipios.flatMap((m) => {
+  const geom = terminos.get(m.id);
+  if (!geom) return [];
+  const colores = fechas.map((f) => m.dias.find((d) => d.fecha === f)?.info?.fondo ?? SIN_DATO);
+  return [{ id: m.id, nombre: m.nombre, d: trazo(geom), estilo: colores.map((c, i) => `--d${i}:${c}`).join(";") }];
+});
+const haySinDato = municipios.some((m) => fechas.some((f) => !m.dias.find((d) => d.fecha === f)?.info));
+
+// Rótulos de referencia: la capital y tres cabeceras repartidas por la provincia
+const REFERENCIAS = ["04013", "04902", "04053", "04099"];
+const rotulos = getMunicipios()
+  .filter((m) => REFERENCIAS.includes(m.id))
+  .map((m) => {
+    const [x, y] = proy(m.lon, m.lat);
+    const derecha = x < ANCHO * 0.7;
+    return { nombre: m.nombre, x, y, derecha };
+  });
+
+const textoDia = (d: DiaProvincia) => (d.etiqueta === "Hoy" || d.etiqueta === "Mañana" ? d.etiqueta.toLowerCase() : `el ${d.etiqueta.toLowerCase()}`);
+const etiquetaMapa = (d: DiaProvincia) => `Mapa de la calima prevista ${textoDia(d)} en los municipios de Almería. ${d.frase}`;
+const MAX_NOMBRES = 12;
+---
+
+{
+  dias.length > 0 && formas.length > 0 && (
+    <div class="cm flex flex-col gap-5" data-cm>
+      {dias.length > 1 && (
+        <div class="cm-selector segmentado self-start" role="group" aria-label="Día del mapa">
+          {dias.map((d, i) => (
+            <button type="button" aria-pressed={i === 0 ? "true" : "false"} data-cm-boton={i} data-etiqueta={etiquetaMapa(d)}>
+              {d.etiqueta}
+            </button>
+          ))}
+        </div>
+      )}
+      <div class="flex flex-wrap items-start gap-x-10 gap-y-6">
+        <figure class="panel m-0 flex-[1_1_340px] p-3 md:max-w-[560px] md:p-5">
+          <svg class="cm-svg block h-auto w-full" viewBox={`0 0 ${ANCHO} ${ALTO}`} data-dia="0" role="img" aria-label={etiquetaMapa(dias[0])} data-cm-svg>
+            <g>
+              {formas.map((f) => (
+                <path class="cm-mun" d={f.d} style={f.estilo}>
+                  <title>{f.nombre}</title>
+                </path>
+              ))}
+            </g>
+            {contorno && <path class="cm-contorno" d={contorno} />}
+            {rotulos.map((r) => (
+              <g class="cm-rotulo">
+                <circle cx={r.x} cy={r.y} r="4" />
+                <text x={r.derecha ? r.x + 8 : r.x - 8} y={r.y + 6} text-anchor={r.derecha ? "start" : "end"}>
+                  {r.nombre}
+                </text>
+              </g>
+            ))}
+          </svg>
+          <figcaption class="mt-3 flex flex-col gap-2.5 px-1">
+            <ul class="m-0 flex list-none flex-wrap gap-x-4 gap-y-1.5 p-0 text-sm">
+              {ESCALA_CALIMA.map((n) => (
+                <li class="flex items-center gap-1.5">
+                  <span class={`inline-block size-3.5 rounded-[2px] ${n.borde ? "border border-ceniza" : ""}`} style={`background:${n.fondo}`} aria-hidden="true" />
+                  {n.nombre}
+                </li>
+              ))}
+              {haySinDato && (
+                <li class="flex items-center gap-1.5">
+                  <span class="inline-block size-3.5 rounded-[2px] border border-ceniza bg-blanco" aria-hidden="true" />
+                  Sin dato
+                </li>
+              )}
+            </ul>
+            <p class="nota">
+              Nivel del momento con más polvo de cada día. Los valores de cada municipio, en <a href={`#${idTabla}`}>la tabla por municipio</a>.
+            </p>
+          </figcaption>
+        </figure>
+
+        <div class="flex min-w-0 flex-[1_1_320px] flex-col gap-4" aria-live="polite">
+          {dias.map((d, i) => (
+            <div class="flex flex-col gap-3" data-cm-dia={i} hidden={i !== 0}>
+              <h3 class="titular titular-3">{d.etiqueta}</h3>
+              <p class="text-lg leading-normal">{d.frase}</p>
+              {d.max && d.infoMax && d.nivelMax !== "sin" && (
+                <p class="flex items-center gap-2.5">
+                  <span class={`rounded-[3px] px-2 py-0.5 font-bold ${d.infoMax.clase} ${d.infoMax.borde ? "border border-ceniza" : ""}`}>{fmtPolvo(d.max.valor)}</span>
+                  <span>
+                    máximo, en {d.max.nombre}
+                  </span>
+                </p>
+              )}
+              {d.conCalima.length > 0 ? (
+                <div class="flex flex-col gap-1.5">
+                  <h4 class="text-base font-bold">Municipios con calima</h4>
+                  <ul class="m-0 flex list-none flex-col p-0">
+                    {d.conCalima.slice(0, MAX_NOMBRES).map((c) => (
+                      <li class="flex items-center justify-between gap-3 border-t border-linea py-1.5">
+                        <span class="inline-flex items-center gap-2">
+                          <span class={`inline-block size-3 rounded-[2px] ${infoNivel(c.nivel).borde ? "border border-ceniza" : ""}`} style={`background:${infoNivel(c.nivel).fondo}`} aria-hidden="true" />
+                          {c.nombre}
+                        </span>
+                        <span class="text-ceniza">{fmtPolvo(c.valor)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                  {d.conCalima.length > MAX_NOMBRES && <p class="nota">Y {d.conCalima.length - MAX_NOMBRES} municipios más, en la tabla.</p>}
+                </div>
+              ) : (
+                <p class="text-gris-texto">Ningún municipio pasa de {ESCALA_CALIMA[0].hasta} µg/m³, el umbral de la calima débil.</p>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+<style>
+  .cm-mun {
+    fill: var(--d0);
+    stroke: var(--color-blanco);
+    stroke-width: 0.8;
+    stroke-linejoin: round;
+  }
+  .cm-svg[data-dia="1"] .cm-mun {
+    fill: var(--d1);
+  }
+  .cm-svg[data-dia="2"] .cm-mun {
+    fill: var(--d2);
+  }
+  .cm-svg[data-dia="3"] .cm-mun {
+    fill: var(--d3);
+  }
+  .cm-svg[data-dia="4"] .cm-mun {
+    fill: var(--d4);
+  }
+  .cm-svg[data-dia="5"] .cm-mun {
+    fill: var(--d5);
+  }
+  .cm-svg[data-dia="6"] .cm-mun {
+    fill: var(--d6);
+  }
+  .cm-contorno {
+    fill: none;
+    stroke: var(--color-ceniza);
+    stroke-width: 1.4;
+    stroke-linejoin: round;
+  }
+  .cm-rotulo circle {
+    fill: var(--color-basalto);
+    stroke: var(--color-blanco);
+    stroke-width: 1.5;
+  }
+  .cm-rotulo text {
+    fill: var(--color-basalto);
+    font-size: 24px;
+    font-weight: 700;
+    paint-order: stroke;
+    stroke: var(--color-blanco);
+    stroke-width: 4px;
+    stroke-linejoin: round;
+  }
+  html:not(.js) .cm-selector {
+    display: none;
+  }
+</style>
+
+<script>
+  // Selector de día del mapa: cambia data-dia del SVG (los colores van en variables CSS) y el texto del día
+  for (const raiz of document.querySelectorAll<HTMLElement>("[data-cm]")) {
+    const svg = raiz.querySelector<SVGSVGElement>("[data-cm-svg]");
+    const botones = Array.from(raiz.querySelectorAll<HTMLButtonElement>("[data-cm-boton]"));
+    const bloques = Array.from(raiz.querySelectorAll<HTMLElement>("[data-cm-dia]"));
+    for (const b of botones) {
+      b.addEventListener("click", () => {
+        const i = b.dataset.cmBoton ?? "0";
+        svg?.setAttribute("data-dia", i);
+        if (b.dataset.etiqueta) svg?.setAttribute("aria-label", b.dataset.etiqueta);
+        for (const o of botones) o.setAttribute("aria-pressed", String(o === b));
+        for (const bl of bloques) bl.hidden = bl.dataset.cmDia !== i;
+      });
+    }
+  }
+</script>
