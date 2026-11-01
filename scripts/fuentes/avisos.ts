@@ -484,7 +484,13 @@ export const actualizar: Fuente = async (ctx: Ctx): Promise<ResultadoFuente> => 
     const lmPrevio = previoMeta.rss?.lastModified ?? null;
     const metaRss = (alDia: boolean) => ({ rss: { lastModified: (alDia ? rss?.lastModified : null) ?? lmPrevio } });
     if (fresco && valido && rss && (rss.estado === 304 || (rss.elaborado != null && rss.elaborado === valido.elaborado))) {
-      return res({ ok: true, cambiado: false, nota: `sin edición nueva (${horaLegible(valido.elaborado)})`, metaFuente: metaRss(true) });
+      // Se repiten los datos de avisos.json por si meta.json no los tenía (p. ej. caché restaurada sin meta)
+      return res({
+        ok: true,
+        cambiado: false,
+        nota: `sin edición nueva (${horaLegible(valido.elaborado)})`,
+        metaFuente: { actualizado: valido.actualizado, elaborado: valido.elaborado, origen: valido.origen, avisos: valido.avisos.length, ...metaRss(true) },
+      });
     }
 
     // 2. Tar: OpenData; si falla (o trae una edición anterior a la del RSS), el tar enlazado desde el RSS

@@ -4,7 +4,8 @@
 //
 // Uso:  npm run fetch:data                       (lee AEMET_API_KEY de .env si existe)
 //       npm run fetch:data -- --forzar           (ignora los TTL de todas las fuentes)
-//       npm run fetch:data -- --solo aemet       (solo esa fuente, forzada: aemet, openmeteo, zonas, observaciones, radar, ria)
+//       npm run fetch:data -- --solo aemet       (solo esa fuente, forzada: avisos, aemet, openmeteo, mar, calima,
+//                                                  zonas, observaciones, radar, playas, ria)
 // Sin AEMET_API_KEY (solo en local, nunca en CI) se saltan las fuentes AEMET y se conserva lo que hubiera.
 import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
@@ -29,12 +30,21 @@ const MAX_SIN_DATOS = 0.2; // si más del 20 % de municipios se queda sin ningun
 const ANTIGUEDAD_FALLO_AEMET_MS = 24 * 3_600_000;
 
 // Orden de ejecución. Los opcionales los crean otras tareas: si el archivo no existe, se saltan.
+// - avisos va primero: es lo más urgente y casi siempre solo pide el RSS público (sin cupo).
+// - Open-Meteo: openmeteo (206) + mar (20) + calima (103) caben en el mismo minuto (≤329 de 600); zonas (≈350)
+//   va detrás y espera 61 s si ya se pidió Open-Meteo en esta ejecución.
+// - AEMET: todos los módulos comparten el ritmo de 1,6 s del ClienteAemet (≤37,5 peticiones/min en total).
+//   playas va al final porque su lote (22 peticiones, ~35 s) no debe retrasar el radar.
 const MODULOS: { nombre: string; archivo: string; clave: string; opcional?: boolean }[] = [
+  { nombre: "avisos", archivo: "avisos.ts", clave: "avisos" },
   { nombre: "aemet", archivo: "aemet.ts", clave: "aemet" },
   { nombre: "openmeteo", archivo: "openmeteo.ts", clave: "openMeteo" },
+  { nombre: "mar", archivo: "mar.ts", clave: "mar" },
+  { nombre: "calima", archivo: "calima.ts", clave: "calima" },
   { nombre: "zonas", archivo: "zonas.ts", clave: "zonas", opcional: true },
   { nombre: "observaciones", archivo: "observaciones.ts", clave: "observaciones" },
   { nombre: "radar", archivo: "radar.ts", clave: "radar", opcional: true },
+  { nombre: "playas", archivo: "playas.ts", clave: "playas" },
   { nombre: "ria", archivo: "ria.ts", clave: "ria", opcional: true },
 ];
 
@@ -46,11 +56,18 @@ const META_FUENTE: Record<string, Record<string, unknown>> = {
   observaciones: { actualizado: null },
   radar: { actualizado: null },
   ria: { actualizado: null, ultimoDia: null },
+  // Sin objetos anidados por defecto: mar, calima y avisos recurren a su propio JSON cuando falta el dato en meta
+  avisos: { actualizado: null, elaborado: null },
+  playas: { actualizado: null, elaborado: null },
+  mar: { actualizado: null, peso: 0 },
+  calima: { actualizado: null, peso: 0 },
 };
 
+type Gasto = { aemet: number; openMeteo: number };
 type Consumo = {
-  dias: Record<string, { aemet: number; openMeteo: number; ejecuciones: number }>;
-  ejecuciones: { inicio: string; segundos: number; aemet: number; openMeteo: number; fuentes: Record<string, string> }[];
+  // porFuente: solo las fuentes que han gastado algo ese día (para comprobar el presupuesto de cada módulo)
+  dias: Record<string, Gasto & { ejecuciones: number; porFuente?: Record<string, Gasto> }>;
+  ejecuciones: { inicio: string; segundos: number; aemet: number; openMeteo: number; fuentes: Record<string, string>; gasto?: Record<string, Gasto> }[];
 };
 
 function leerArgumentos(argv: string[]) {
@@ -106,6 +123,7 @@ async function main() {
   let peticionesAemet = 0;
   let pesoOpenMeteo = 0;
   const estados: Record<string, string> = {};
+  const gastoFuentes: Record<string, Gasto> = {};
   for (const mod of MODULOS) {
     if (solo && mod.nombre !== solo) continue;
     const archivo = path.join(DIR_FUENTES, mod.archivo);
@@ -131,6 +149,7 @@ async function main() {
     if (r.pesoOpenMeteo !== undefined) ctx.yaPidioOpenMeteo = true;
     peticionesAemet += r.peticionesAemet ?? 0;
     pesoOpenMeteo += r.pesoOpenMeteo ?? 0;
+    if (r.peticionesAemet || r.pesoOpenMeteo) gastoFuentes[clave] = { aemet: r.peticionesAemet ?? 0, openMeteo: r.pesoOpenMeteo ?? 0 };
     estados[clave] = !r.ok ? "error" : r.cambiado ? "cambiado" : "sin cambios";
     const consumo = [
       r.peticionesAemet ? `${r.peticionesAemet} peticiones AEMET` : "",
@@ -191,11 +210,21 @@ async function main() {
   const consumo = await leerJson<Consumo>(rutaConsumo, { dias: {}, ejecuciones: [] });
   const dia = inicio.toISOString().slice(0, 10); // los límites diarios de Open-Meteo van por día UTC
   const total = consumo.dias[dia] ?? { aemet: 0, openMeteo: 0, ejecuciones: 0 };
-  consumo.dias[dia] = { aemet: total.aemet + peticionesAemet, openMeteo: total.openMeteo + pesoOpenMeteo, ejecuciones: total.ejecuciones + 1 };
+  const porFuente: Record<string, Gasto> = { ...(total.porFuente ?? {}) };
+  for (const [clave, g] of Object.entries(gastoFuentes)) {
+    const previoFuente = porFuente[clave] ?? { aemet: 0, openMeteo: 0 };
+    porFuente[clave] = { aemet: previoFuente.aemet + g.aemet, openMeteo: previoFuente.openMeteo + g.openMeteo };
+  }
+  consumo.dias[dia] = {
+    aemet: total.aemet + peticionesAemet,
+    openMeteo: total.openMeteo + pesoOpenMeteo,
+    ejecuciones: total.ejecuciones + 1,
+    porFuente,
+  };
   consumo.dias = Object.fromEntries(Object.entries(consumo.dias).sort().slice(-14));
   consumo.ejecuciones = [
     ...consumo.ejecuciones,
-    { inicio: inicio.toISOString(), segundos, aemet: peticionesAemet, openMeteo: pesoOpenMeteo, fuentes: estados },
+    { inicio: inicio.toISOString(), segundos, aemet: peticionesAemet, openMeteo: pesoOpenMeteo, fuentes: estados, gasto: gastoFuentes },
   ].slice(-200);
   await escribirJson(rutaConsumo, consumo);
 

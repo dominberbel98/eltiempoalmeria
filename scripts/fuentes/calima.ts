@@ -158,7 +158,9 @@ export const actualizar: Fuente = async (ctx) => {
                 ? `datos de hace ${Math.round(edad / 60)} h`
                 : null;
     if (!motivo) {
-      return { ...base, ok: true, cambiado: false, nota: `vigente (${Math.round(edad)} min, sin pasada nueva de CAMS)`, metaFuente: ant };
+      // Con los datos de calima.json por si meta.json no los tenía
+      const metaFuente = { ...ant, actualizado: ant.actualizado ?? previo?.actualizado ?? null, pasadas: { europa: pasadasAnt.europa ?? null, global: pasadasAnt.global ?? null } };
+      return { ...base, ok: true, cambiado: false, nota: `vigente (${Math.round(edad)} min, sin pasada nueva de CAMS)`, metaFuente };
     }
 
     const url = new URL(URL_AQ);

@@ -13,6 +13,24 @@ export type FuentesMeta = {
   observaciones: { actualizado: string | null };
   radar: { actualizado: string | null; comprobado?: string | null; ultimaImagen?: string | null };
   ria: { actualizado: string | null; ultimoDia: string | null };
+  // Avisos CAP: cuando no hay edición nueva el módulo solo renueva `rss` y se conservan los demás campos.
+  avisos: {
+    actualizado: string | null /*ISO UTC de la última descarga correcta*/;
+    elaborado: string | null /*ISO UTC de elaboración del tar*/;
+    origen?: "opendata" | "web";
+    avisos?: number;
+    rss?: { lastModified: string | null };
+  };
+  // Playas: `comprobado`, `reintento` y `fallidas` son internos del módulo.
+  playas: {
+    actualizado: string | null;
+    elaborado: string | null /*edición más reciente, UTC sin Z*/;
+    comprobado?: string | null;
+    reintento?: string | null;
+    fallidas?: Record<string, string>;
+  };
+  mar: { actualizado: string | null; peso: number; costera?: { elaborado: string | null /*UTC sin Z*/; comprobado: string | null } };
+  calima: { actualizado: string | null; peso: number; pasadas?: { europa: string | null; global: string | null } };
 };
 export type Meta = { updatedAt: string; fallosAemet: string[]; fuentes: Partial<FuentesMeta> };
 

@@ -13,7 +13,8 @@
     "build": "astro check && astro build",
     "preview": "astro preview",
     "generar:nucleos": "tsx scripts/generar-nucleos.ts",
-    "generar:zonas": "tsx scripts/generar-zonas.ts"
+    "generar:zonas": "tsx scripts/generar-zonas.ts",
+    "generar:playas": "tsx scripts/fuentes/playas.ts --maestro"
   },
   "dependencies": {
     "@astrojs/react": "^7.1.1",
