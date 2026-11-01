@@ -7,6 +7,7 @@ import Resumen from "../components/Resumen.astro";
 import Semana from "../components/Semana.astro";
 import TablaHoras from "../components/TablaHoras.astro";
 import Fuentes from "../components/Fuentes.astro";
+import AvisosBanda from "../components/AvisosBanda.astro";
 import Meteograma from "../components/Meteograma";
 import VistaZonas from "../components/VistaZonas";
 // Estilos de la vista por zonas (la isla no los importa: ver VistaZonas.tsx)
@@ -93,6 +94,8 @@ const jsonLd = {
     <a href={base}><span class="migas-largo">Provincia de Almería</span><span class="migas-corto">Provincia</span></a> /{" "}
     <span aria-current="page">{m.nombre}</span>
   </nav>
+
+  <AvisosBanda municipio={m} />
 
   <Resumen municipio={m} prevision={p} titular subtitulo={subtitulo} />
 

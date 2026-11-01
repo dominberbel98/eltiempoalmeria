@@ -1,0 +1,983 @@
+---
+// /avisos/: avisos meteorológicos de AEMET (Plan Meteoalerta) en vigor y previstos para las zonas de Almería.
+// Banda de basalto con el estado y un mapa SVG estático de las 6 zonas de aviso (generado en el build a partir
+// de los términos municipales agrupados por zona y de los polígonos costeros del CAP), los avisos uno a uno,
+// las zonas, la tabla de los 103 municipios con su zona y nivel (alternativa del mapa) y qué significa cada nivel.
+import polygonClipping from "polygon-clipping";
+import Base from "../layouts/Base.astro";
+import { getMunicipios } from "../lib/datos";
+import { areaPoligonoHa, leerTerminos, type MultiPoligono, type Poligono } from "../lib/geozonas";
+import { ZONA, horasDesde, textoActualizacion } from "../lib/tiempo";
+import {
+  ATRIBUCION_AVISOS,
+  COLOR_NIVEL,
+  NIVELES,
+  NOMBRE_NIVEL,
+  SIGNIFICADO_NIVEL,
+  URL_AVISOS_AEMET,
+  VAR_NIVEL,
+  clasificar,
+  estadoAviso,
+  getAvisos,
+  getZonasAviso,
+  municipiosDeZona,
+  nivelMaximo,
+  nivelesPorMunicipio,
+  nivelesPorZona,
+  textoCuando,
+  textoIntervalo,
+  textoParametros,
+  textoProbabilidad,
+  textoZonas,
+  tituloAviso,
+  zonasAvisoDeMunicipio,
+  type Aviso,
+  type NivelAviso,
+  type ZonaAvisoAlmeria,
+} from "../lib/avisos";
+
+const base = import.meta.env.BASE_URL;
+const ahora = new Date();
+const datos = getAvisos();
+const { vigentes, proximos } = clasificar(datos?.avisos ?? [], ahora);
+const activos = [...vigentes, ...proximos];
+const zonas = getZonasAviso();
+
+// Nivel por zona y por municipio: en vigor ahora y contando también los previstos
+const nivelZonaAhora = nivelesPorZona(ahora, { incluirProximos: false });
+const nivelZonaTodo = nivelesPorZona(ahora);
+const nivelMunAhora = nivelesPorMunicipio(ahora, { incluirProximos: false });
+const nivelMunTodo = nivelesPorMunicipio(ahora);
+const nivelMax = nivelMaximo(activos);
+const nivelMaxAhora = nivelMaximo(vigentes);
+
+const municipios = [...getMunicipios()].sort((a, b) => a.nombre.localeCompare(b.nombre, "es"));
+const conAvisoPrevisto = municipios.filter((m) => nivelMunTodo[m.id] && !nivelMunAhora[m.id]).length;
+const conAvisoAhora = municipios.filter((m) => nivelMunAhora[m.id]).length;
+const zonasConAviso = zonas.filter((z) => nivelZonaTodo[z.codigo]).length;
+
+// --- Textos ---
+const fmtFechaHora = new Intl.DateTimeFormat("es-ES", {
+  timeZone: ZONA,
+  weekday: "long",
+  day: "numeric",
+  month: "long",
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+});
+// "el sábado 31 de octubre a las 23:50"
+function textoMomento(iso: string | null | undefined): string | null {
+  const t = iso ? Date.parse(iso) : NaN;
+  if (Number.isNaN(t)) return null;
+  const p = Object.fromEntries(fmtFechaHora.formatToParts(new Date(t)).map((x) => [x.type, x.value]));
+  const hora = `${p.hour}:${p.minute}`;
+  return `el ${p.weekday} ${p.day} de ${p.month} ${hora.startsWith("01:") ? "a la" : "a las"} ${hora}`;
+}
+const plural = (n: number, uno: string, varios: string) => `${n} ${n === 1 ? uno : varios}`;
+
+const elaborado = textoMomento(datos?.elaborado);
+// El módulo de descarga renueva avisos.json con cada boletín nuevo y, si no lo hay, cada 6 h
+const avisosDesfasados = datos != null && horasDesde(datos.actualizado) > 7;
+
+let estado: string;
+let detalleEstado: string;
+if (!datos) {
+  estado = "No hay datos de avisos en esta actualización";
+  detalleEstado = "No se ha podido leer el último boletín de avisos de AEMET. Consulta los avisos en la web de AEMET.";
+} else if (!activos.length) {
+  estado = "No hay avisos activos en Almería";
+  detalleEstado = "AEMET no tiene avisos amarillos, naranjas ni rojos en vigor ni previstos para la provincia.";
+} else {
+  const partes: string[] = [];
+  if (vigentes.length) partes.push(plural(vigentes.length, "aviso en vigor", "avisos en vigor"));
+  if (proximos.length) partes.push(plural(proximos.length, "aviso previsto", "avisos previstos"));
+  estado = `${partes.join(" y ")} en Almería`;
+  estado = estado.charAt(0).toUpperCase() + estado.slice(1);
+  detalleEstado = nivelMaxAhora
+    ? `Nivel más alto ahora: ${NOMBRE_NIVEL[nivelMaxAhora].toLowerCase()}, en ${plural(conAvisoAhora, "municipio", "municipios")} de 103.`
+    : `Ahora no hay ninguno en vigor. El primero empieza ${textoCuando(proximos[0], ahora).replace(/^Desde /, "")}.`;
+}
+
+// Etiqueta del nivel de una zona o municipio: "Aviso naranja", "Aviso amarillo previsto", "Sin aviso"
+function textoNivel(ahoraN: NivelAviso | null, todoN: NivelAviso | null): string {
+  if (ahoraN) return `Aviso ${ahoraN}${todoN && todoN !== ahoraN ? `, ${todoN} previsto` : ""}`;
+  if (todoN) return `Aviso ${todoN} previsto`;
+  return "Sin aviso";
+}
+
+// --- Mapa SVG de las zonas de aviso ---
+type Par = [number, number];
+const CAJA = { lonMin: -3.2, lonMax: -1.56, latMin: 36.5, latMax: 37.95 };
+const COS = Math.cos((37.2 * Math.PI) / 180);
+const ANCHO = 1000;
+const ESCALA = ANCHO / ((CAJA.lonMax - CAJA.lonMin) * COS);
+const ALTO = Math.round((CAJA.latMax - CAJA.latMin) * ESCALA);
+const px = (lon: number) => (lon - CAJA.lonMin) * COS * ESCALA;
+const py = (lat: number) => (CAJA.latMax - lat) * ESCALA;
+
+// Trazado SVG compacto: coordenadas enteras (1 unidad ≈ 150 m), puntos a menos de 2,5 unidades del anterior
+// descartados (a 600 px de ancho no se distinguen) y desplazamientos relativos.
+const DIST_MIN2 = 2.5 * 2.5;
+function ruta(mp: MultiPoligono): string {
+  let d = "";
+  for (const pol of mp)
+    for (const anillo of pol) {
+      const pts: Par[] = [];
+      for (const [lon, lat] of anillo) {
+        const p: Par = [px(lon), py(lat)];
+        const u = pts.at(-1);
+        if (!u || (p[0] - u[0]) ** 2 + (p[1] - u[1]) ** 2 >= DIST_MIN2) pts.push(p);
+      }
+      if (pts.length < 4) continue;
+      const ent = pts.map(([x, y]) => [Math.round(x), Math.round(y)]);
+      const pasos: string[] = [];
+      for (let i = 1; i < ent.length; i++) {
+        const dx = ent[i][0] - ent[i - 1][0];
+        const dy = ent[i][1] - ent[i - 1][1];
+        if (dx || dy) pasos.push(`${dx} ${dy}`);
+      }
+      d += `M${ent[0][0]} ${ent[0][1]}l${pasos.join(" ")}z`;
+    }
+  return d;
+}
+
+const terminos = leerTerminos();
+const rectangulo: Poligono = [
+  [
+    [CAJA.lonMin, CAJA.latMin],
+    [CAJA.lonMax, CAJA.latMin],
+    [CAJA.lonMax, CAJA.latMax],
+    [CAJA.lonMin, CAJA.latMax],
+    [CAJA.lonMin, CAJA.latMin],
+  ],
+];
+type FormaZona = { zona: ZonaAvisoAlmeria; d: string };
+const formas: FormaZona[] = [];
+for (const z of zonas) {
+  try {
+    let mp: MultiPoligono;
+    if (z.tipo === "tierra") {
+      const partes = municipiosDeZona(z.codigo)
+        .filter((id) => zonasAvisoDeMunicipio(id).tierra?.codigo === z.codigo)
+        .map((id) => terminos.get(id))
+        .filter((t): t is MultiPoligono => t != null);
+      const union = partes.length ? (polygonClipping.union(...(partes as [MultiPoligono, ...MultiPoligono[]])) as MultiPoligono) : [];
+      // Los términos no encajan al milímetro: la unión deja huecos y astillas. Una zona de tierra no tiene huecos:
+      // se queda solo el contorno exterior de cada parte y se descartan las partes de menos de 50 ha.
+      mp = union.filter((pol) => areaPoligonoHa(pol) >= 50).map((pol) => [pol[0]]);
+    } else {
+      // Zona costera: el polígono del CAP (mar adentro) recortado a la caja del mapa; la tierra se pinta encima
+      const anillo = z.poligono.map(([lon, lat]) => [lon, lat] as Par);
+      mp = polygonClipping.intersection([anillo], rectangulo) as MultiPoligono;
+    }
+    formas.push({ zona: z, d: ruta(mp) });
+  } catch {
+    // Una geometría defectuosa no rompe el build: esa zona queda fuera del mapa (sigue en la lista y la tabla)
+  }
+}
+const lineasMunicipios = ruta([...terminos.values()].flat());
+const costeras = formas.filter((f) => f.zona.tipo === "costa");
+const deTierra = formas.filter((f) => f.zona.tipo === "tierra");
+
+// Relleno por estado: en vigor, color del nivel (sobre basalto); solo previsto, rayado del nivel; sin aviso, basalto-2
+const relleno = (codigo: string) => {
+  const a = nivelZonaAhora[codigo];
+  const t = nivelZonaTodo[codigo];
+  if (a) return COLOR_NIVEL[a].marcaOscuro;
+  if (t) return `url(#rayado-${t})`;
+  return null;
+};
+
+// Rótulos (HTML sobre el SVG, en %): nombre corto de la zona y su estado. Con `derecha`, lon marca el borde derecho.
+const ROTULOS: Record<string, { nombre: string; lon: number; lat: number; derecha?: boolean }> = {
+  "610401": { nombre: "Almanzora y Los Vélez", lon: -2.22, lat: 37.6 },
+  "610402": { nombre: "Nacimiento y Tabernas", lon: -2.62, lat: 37.18 },
+  "610403": { nombre: "Poniente y Almería", lon: -2.83, lat: 36.92 },
+  "610404": { nombre: "Levante almeriense", lon: -1.99, lat: 37.06 },
+  "610403C": { nombre: "Costa de Poniente", lon: -2.6, lat: 36.62 },
+  "610404C": { nombre: "Costa de Levante", lon: -1.585, lat: 36.66, derecha: true },
+};
+const rotulos = zonas
+  .filter((z) => ROTULOS[z.codigo])
+  .map((z) => {
+    const r = ROTULOS[z.codigo];
+    return {
+      codigo: z.codigo,
+      nombre: r.nombre,
+      estado: textoNivel(nivelZonaAhora[z.codigo], nivelZonaTodo[z.codigo]),
+      costa: z.tipo === "costa",
+      derecha: r.derecha === true,
+      x: (px(r.lon) / ANCHO) * 100,
+      y: (py(r.lat) / ALTO) * 100,
+    };
+  });
+const descripcionMapa = `Mapa de las zonas de aviso de Almería. ${zonas
+  .map((z) => `${z.nombre}: ${textoNivel(nivelZonaAhora[z.codigo], nivelZonaTodo[z.codigo]).toLowerCase()}`)
+  .join(". ")}.`;
+
+// --- Avisos por zona ---
+const porZona = zonas.map((z) => {
+  const lista = activos.filter((a) => a.zonas.some((x) => x.codigo === z.codigo));
+  return {
+    zona: z,
+    vigentes: lista.filter((a) => estadoAviso(a, ahora) === "vigente"),
+    proximos: lista.filter((a) => estadoAviso(a, ahora) === "proximo"),
+    municipios: municipiosDeZona(z.codigo).length,
+    nivelAhora: nivelZonaAhora[z.codigo],
+    nivelTodo: nivelZonaTodo[z.codigo],
+  };
+});
+
+// Municipios afectados por un aviso (por sus zonas)
+const municipiosAviso = (a: Aviso) => new Set(a.zonas.flatMap((z) => municipiosDeZona(z.codigo))).size;
+const textoEmitido = (a: Aviso) => {
+  const t = textoMomento(a.emitido);
+  return t ? `${a.esActualizacion ? "Actualizado por AEMET" : "Emitido por AEMET"} ${t}.` : null;
+};
+// La descripción de AEMET suele repetir los parámetros: solo se muestra si añade algo
+const descripcionUtil = (a: Aviso) => {
+  const d = a.descripcion.trim().replace(/\.$/, "");
+  return d && !textoParametros(a).some((p) => p.replace(/\.$/, "") === d) ? a.descripcion.trim() : null;
+};
+
+const nombreZona = new Map(zonas.map((z) => [z.codigo, z.nombre]));
+// Ancla de cada aviso en la página (los identificadores CAP llevan puntos)
+const anclas = new Map(activos.map((a, i) => [a.id, `aviso-${i + 1}`]));
+const idAviso = (a: Aviso) => anclas.get(a.id) ?? "aviso";
+const mayuscula = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
+
+const jsonLd = {
+  "@context": "https://schema.org",
+  "@type": "WebPage",
+  name: "Avisos meteorológicos en Almería",
+  url: new URL(`${base}avisos/`, Astro.site).href,
+  inLanguage: "es-ES",
+  description: "Avisos amarillos, naranjas y rojos de AEMET en vigor y previstos para las zonas de la provincia de Almería.",
+  ...(datos?.actualizado ? { dateModified: datos.actualizado } : {}),
+};
+---
+
+<Base
+  title="Avisos meteorológicos en Almería: avisos de AEMET hoy"
+  description="Avisos amarillos, naranjas y rojos de AEMET en vigor y previstos en la provincia de Almería por zonas: lluvias, tormentas, viento, costeros y temperaturas, con el mapa de zonas y el aviso de cada municipio."
+  jsonLd={jsonLd}
+  ancho="completo"
+>
+  <section class="banda-oscura" aria-labelledby="t-avisos">
+    <div class="contenedor av-banda">
+      <div class="av-estado">
+        <h1 id="t-avisos" class="titular titular-banda">Avisos meteorológicos en Almería</h1>
+
+        <div class="av-resumen">
+          {
+            nivelMax ? (
+              <span
+                class="av-nivel av-nivel-grande"
+                style={`background:${COLOR_NIVEL[nivelMaxAhora ?? nivelMax].marcaOscuro};color:${COLOR_NIVEL.amarillo.tinta}`}
+              >
+                Nivel {nivelMaxAhora ?? nivelMax}
+                {!nivelMaxAhora && ", previsto"}
+              </span>
+            ) : (
+              <span class="av-nivel av-nivel-grande av-nivel-sin">{datos ? "Sin avisos" : "Sin datos"}</span>
+            )
+          }
+          <p class="av-estado-texto">
+            <strong>{estado}.</strong> {detalleEstado}
+          </p>
+        </div>
+
+        <dl class="av-datos">
+          <div>
+            <dt>Zonas con aviso</dt>
+            <dd>{datos ? `${zonasConAviso} de ${zonas.length}` : "—"}</dd>
+          </div>
+          <div>
+            <dt>Municipios con aviso en vigor</dt>
+            <dd>{datos ? `${conAvisoAhora} de ${municipios.length}` : "—"}</dd>
+          </div>
+          {
+            conAvisoPrevisto > 0 && (
+              <div>
+                <dt>Con aviso previsto, aún no en vigor</dt>
+                <dd>{`${conAvisoPrevisto} de ${municipios.length}`}</dd>
+              </div>
+            )
+          }
+          <div>
+            <dt>Último boletín de AEMET</dt>
+            <dd>{elaborado ? elaborado.replace(/^el /, "") : "sin datos"}</dd>
+          </div>
+        </dl>
+
+        {
+          avisosDesfasados && (
+            <p class="aviso">
+              Los avisos pueden no estar al día: la última descarga del boletín de AEMET es del {textoActualizacion(datos?.actualizado)}.
+            </p>
+          )
+        }
+
+        <p class="av-meteoalerta">
+          <a class="boton-claro" href={URL_AVISOS_AEMET}>Ver los avisos en la web de AEMET</a>
+        </p>
+      </div>
+
+      <figure class="av-mapa-figura">
+        <div class="av-mapa" role="img" aria-label={descripcionMapa}>
+          <svg viewBox={`0 0 ${ANCHO} ${ALTO}`} preserveAspectRatio="xMidYMid meet" focusable="false" aria-hidden="true">
+            <defs>
+              {
+                NIVELES.map((n) => (
+                  <pattern id={`rayado-${n}`} width="16" height="16" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+                    <rect width="16" height="16" fill="#263840" />
+                    <rect width="7" height="16" fill={COLOR_NIVEL[n].marcaOscuro} />
+                  </pattern>
+                ))
+              }
+            </defs>
+            {
+              costeras.map((f) => (
+                <path
+                  d={f.d}
+                  class:list={["av-costa", { "av-costa-sin": !relleno(f.zona.codigo) }]}
+                  fill={relleno(f.zona.codigo) ?? undefined}
+                />
+              ))
+            }
+            {deTierra.map((f) => <path d={f.d} class="av-tierra" fill={relleno(f.zona.codigo) ?? "#263840"} />)}
+            <path d={lineasMunicipios} class="av-municipios" />
+            {deTierra.map((f) => <path d={f.d} class="av-borde-zona" />)}
+          </svg>
+          {
+            rotulos.map((r) => (
+              <span class:list={["av-rotulo", { "av-rotulo-costa": r.costa, "av-rotulo-derecha": r.derecha }]} style={`${r.derecha ? `right:${(100 - r.x).toFixed(1)}%` : `left:${r.x.toFixed(1)}%`};top:${r.y.toFixed(1)}%`} aria-hidden="true">
+                <span class="av-rotulo-nombre">{r.nombre}</span>
+                <span class="av-rotulo-estado">{r.estado}</span>
+              </span>
+            ))
+          }
+        </div>
+        <figcaption class="av-leyenda">
+          <ul role="list">
+            {
+              NIVELES.map((n) => (
+                <li>
+                  <span class="av-muestra" style={`background:${COLOR_NIVEL[n].marcaOscuro}`} aria-hidden="true" />
+                  {NOMBRE_NIVEL[n]}
+                </li>
+              ))
+            }
+            <li>
+              <span class="av-muestra av-muestra-rayada" aria-hidden="true"></span>
+              Previsto, aún no en vigor
+            </li>
+            <li>
+              <span class="av-muestra av-muestra-sin" aria-hidden="true"></span>
+              Sin aviso
+            </li>
+          </ul>
+          <p class="nota text-suave-oscuro">
+            Zonas de aviso de AEMET: cuatro de tierra, con los términos municipales que abarcan, y dos costeras, en el mar. Los mismos datos
+            están en la tabla de municipios, más abajo.
+          </p>
+        </figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <div class="contenedor pila av-contenido">
+    {
+      [
+        { id: "vigentes", titulo: "Avisos en vigor", lista: vigentes, nota: null as string | null },
+        {
+          id: "proximos",
+          titulo: "Avisos previstos",
+          lista: proximos,
+          nota: vigentes.length ? null : "Ahora no hay ningún aviso en vigor. Estos son los que AEMET prevé para los próximos días.",
+        },
+      ]
+        .filter((g) => g.lista.length)
+        .map((g) => (
+          <section aria-labelledby={`t-${g.id}`} class="av-seccion">
+            <h2 id={`t-${g.id}`} class="titular titular-2">
+              {g.titulo}
+            </h2>
+            {g.nota && <p class="texto-largo m-0">{g.nota}</p>}
+            <ul class="av-tarjetas" role="list">
+              {g.lista.map((a) => (
+                <li>
+                  <article class="av-tarjeta" id={idAviso(a)} style={`border-left-color:${VAR_NIVEL[a.nivel].borde}`} aria-labelledby={`${idAviso(a)}-t`}>
+                    <header class="av-tarjeta-cabecera">
+                      <span
+                        class="av-nivel"
+                        style={`background:${VAR_NIVEL[a.nivel].marca};color:${COLOR_NIVEL[a.nivel].tinta};border-color:${VAR_NIVEL[a.nivel].borde}`}
+                      >
+                        {NOMBRE_NIVEL[a.nivel]}
+                      </span>
+                      <h3 id={`${idAviso(a)}-t`} class="titular titular-4 av-tarjeta-titulo">
+                        {tituloAviso(a)}
+                      </h3>
+                    </header>
+                    <p class="av-cuando">
+                      <strong>
+                        {estadoAviso(a, ahora) === "vigente" ? "En vigor. " : "Previsto. "}
+                        {textoCuando(a, ahora)}.
+                      </strong>{" "}
+                      <span class="texto-secundario">{mayuscula(textoIntervalo(a.inicio, a.fin))}.</span>
+                    </p>
+                    <dl class="av-tarjeta-datos">
+                      <div>
+                        <dt>{a.zonas.length === 1 ? "Zona" : "Zonas"}</dt>
+                        <dd>
+                          {textoZonas(a.zonas)} ({plural(municipiosAviso(a), "municipio", "municipios")})
+                        </dd>
+                      </div>
+                      {textoParametros(a).length > 0 && (
+                        <div>
+                          <dt>Umbral</dt>
+                          <dd>{textoParametros(a).join(". ")}</dd>
+                        </div>
+                      )}
+                      {textoProbabilidad(a) && (
+                        <div>
+                          <dt>Probabilidad</dt>
+                          <dd>{textoProbabilidad(a)?.replace(/^Probabilidad:? (del )?/, "")}</dd>
+                        </div>
+                      )}
+                    </dl>
+                    {descripcionUtil(a) && <p class="av-tarjeta-texto">{descripcionUtil(a)}</p>}
+                    {a.instruccion && <p class="av-tarjeta-texto texto-secundario">{a.instruccion}</p>}
+                    {textoEmitido(a) && <p class="nota m-0">{textoEmitido(a)}</p>}
+                  </article>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ))
+    }
+
+    {
+      !activos.length && (
+        <p class="aviso aviso-info av-sin-avisos" role="status">
+          {datos
+            ? "No hay avisos activos en Almería. Si AEMET emite uno, aparecerá aquí y en la página de cada municipio afectado."
+            : "No hay datos de avisos en esta actualización. Mientras tanto, consulta los avisos en la web de AEMET."}
+        </p>
+      )
+    }
+
+    <section aria-labelledby="t-zonas" class="av-seccion">
+      <h2 id="t-zonas" class="titular titular-2">Por zonas</h2>
+      <p class="texto-largo m-0">
+        AEMET divide la provincia en cuatro zonas de aviso en tierra y dos en el mar. Cada municipio pertenece a una zona de tierra y, si tiene
+        costa, también a la zona costera de enfrente.
+      </p>
+      {
+        [
+          { titulo: "En tierra", lista: porZona.filter((p) => p.zona.tipo === "tierra") },
+          { titulo: "En la costa", lista: porZona.filter((p) => p.zona.tipo === "costa") },
+        ].map((g) => (
+          <div class="av-grupo-zonas">
+            <h3 class="av-grupo-titulo">{g.titulo}</h3>
+            <ul class="av-zonas" role="list">
+              {g.lista.map((p) => (
+                <li
+                  class="av-zona"
+                  style={p.nivelTodo ? `border-top-color:${VAR_NIVEL[p.nivelAhora ?? p.nivelTodo].borde}` : undefined}
+                >
+                  <h4 class="av-zona-nombre">{p.zona.nombre}</h4>
+                  <p class="av-zona-estado">
+                    <strong>{textoNivel(p.nivelAhora, p.nivelTodo)}</strong>
+                    <span class="texto-secundario">
+                      {p.zona.tipo === "costa" ? `, ${plural(p.municipios, "municipio con costa", "municipios con costa")}` : `, ${plural(p.municipios, "municipio", "municipios")}`}
+                    </span>
+                  </p>
+                  {(p.vigentes.length > 0 || p.proximos.length > 0) && (
+                    <ul class="av-zona-avisos" role="list">
+                      {[...p.vigentes, ...p.proximos].map((a) => (
+                        <li>
+                          <a href={`#${idAviso(a)}`}>{tituloAviso(a)}</a>: {textoCuando(a, ahora).charAt(0).toLowerCase() + textoCuando(a, ahora).slice(1)}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))
+      }
+    </section>
+
+    <section aria-labelledby="t-municipios" class="av-seccion">
+      <h2 id="t-municipios" class="titular titular-2">Por municipio</h2>
+      <p class="texto-largo m-0">
+        La zona de aviso de cada uno de los 103 municipios y su nivel. Los términos que quedan entre dos zonas se asignan a la que cubre más
+        superficie.
+      </p>
+      <details class="av-tabla">
+        <summary class="enlace-fuerte">Ver la zona y el aviso de los 103 municipios</summary>
+        <div class="tabla-desplazable av-tabla-scroll" role="region" aria-labelledby="t-tabla-municipios" tabindex="0">
+          <table class="tabla av-tabla-tabla">
+            <caption id="t-tabla-municipios" class="sr-only">Zona de aviso y nivel de aviso de los municipios de Almería</caption>
+            <thead>
+              <tr>
+                <th scope="col">Municipio</th>
+                <th scope="col">Zona de aviso</th>
+                <th scope="col">Costa</th>
+                <th scope="col">Aviso</th>
+              </tr>
+            </thead>
+            <tbody>
+              {
+                municipios.map((m) => {
+                  const z = zonasAvisoDeMunicipio(m.id);
+                  const na = nivelMunAhora[m.id] ?? null;
+                  const nt = nivelMunTodo[m.id] ?? null;
+                  return (
+                    <tr>
+                      <th scope="row">
+                        <a href={`${base}${m.slug}/`}>{m.nombre}</a>
+                      </th>
+                      <td>{z.tierra?.nombre ?? "—"}</td>
+                      <td>{z.costa.length ? z.costa.map((c) => nombreZona.get(c.codigo) ?? c.nombre).join("; ") : "No"}</td>
+                      <td>
+                        {nt ? (
+                          <span class="av-celda-nivel">
+                            <span class="av-punto" style={`background:${VAR_NIVEL[na ?? nt].marca};border-color:${VAR_NIVEL[na ?? nt].borde}`} aria-hidden="true" />
+                            {textoNivel(na, nt)}
+                          </span>
+                        ) : (
+                          <span class="texto-secundario">Sin aviso</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })
+              }
+            </tbody>
+          </table>
+        </div>
+      </details>
+    </section>
+
+    <section aria-labelledby="t-niveles" class="av-seccion">
+      <h2 id="t-niveles" class="titular titular-2">Qué significa cada nivel</h2>
+      <ul class="av-niveles" role="list">
+        {
+          NIVELES.map((n) => (
+            <li class="av-nivel-item" style={`border-top-color:${VAR_NIVEL[n].borde}`}>
+              <h3 class="titular titular-4 m-0" style={`color:${VAR_NIVEL[n].texto}`}>
+                Aviso {n}
+              </h3>
+              <p class="m-0">{SIGNIFICADO_NIVEL[n]}</p>
+            </li>
+          ))
+        }
+      </ul>
+      <p class="nota m-0">
+        Sin aviso (nivel verde en Meteoalerta), no se espera ningún fenómeno meteorológico adverso. Los umbrales de cada aviso cambian según
+        la zona: no es lo mismo una racha de 70 km/h en la costa que en la sierra.
+      </p>
+    </section>
+
+    <section aria-labelledby="t-fuente" class="av-seccion av-fuente">
+      <h2 id="t-fuente" class="text-lg font-bold">Fuente</h2>
+      <p class="texto-largo m-0">
+        {ATRIBUCION_AVISOS}: avisos del Plan Meteoalerta para las zonas de Almería.
+        {elaborado && ` Boletín elaborado ${elaborado}.`}
+        {datos?.actualizado && ` Descargado el ${textoActualizacion(datos.actualizado)}; se comprueba cada 15 minutos.`}
+        {" "}El aviso oficial es siempre el de AEMET: <a href={URL_AVISOS_AEMET}>avisos de AEMET para Andalucía</a>.
+      </p>
+    </section>
+  </div>
+
+  <p slot="pie">
+    Avisos: {ATRIBUCION_AVISOS} (<a href={URL_AVISOS_AEMET}>Meteoalerta</a>).
+  </p>
+</Base>
+
+<style>
+  /* Banda de basalto: estado a la izquierda y mapa a la derecha */
+  .av-banda {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 32px 48px;
+  }
+  .av-estado {
+    flex: 1 1 380px;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+  .av-estado h1 {
+    margin: 0;
+  }
+  .av-resumen {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+  .av-estado-texto {
+    margin: 0;
+    max-width: 44ch;
+    font-size: 18px;
+    line-height: 1.5;
+    color: var(--color-texto-oscuro);
+  }
+  .av-estado-texto strong {
+    color: var(--color-cal);
+  }
+  .av-datos {
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .av-datos > div {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--color-linea-oscura);
+  }
+  .av-datos dt {
+    color: var(--color-suave-oscuro);
+  }
+  .av-datos dd {
+    margin: 0;
+    text-align: right;
+    font-weight: 700;
+  }
+  .av-meteoalerta {
+    margin: 0;
+  }
+
+  /* Etiqueta de nivel (texto, no solo color) */
+  .av-nivel {
+    display: inline-block;
+    flex: 0 0 auto;
+    min-width: 76px;
+    padding: 2px 8px;
+    border: 1px solid transparent;
+    border-radius: 3px;
+    font-size: 14px;
+    font-weight: 700;
+    text-align: center;
+  }
+  .av-nivel-grande {
+    padding: 4px 12px;
+    font-size: 16px;
+  }
+  .av-nivel-sin {
+    background: var(--color-basalto-2);
+    border-color: var(--color-borde-oscuro);
+    color: var(--color-cal);
+  }
+
+  /* Mapa */
+  .av-mapa-figura {
+    flex: 1 1 420px;
+    min-width: 0;
+    max-width: 620px;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .av-mapa {
+    position: relative;
+    container-type: inline-size;
+  }
+  .av-mapa svg {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+  .av-tierra {
+    stroke: none;
+  }
+  .av-costa {
+    stroke: var(--color-borde-oscuro);
+    stroke-width: 1.5;
+  }
+  .av-costa-sin {
+    fill: var(--color-basalto-2);
+    fill-opacity: 0.35;
+    stroke-dasharray: 6 5;
+  }
+  .av-municipios {
+    fill: none;
+    stroke: var(--color-basalto);
+    stroke-width: 1;
+    stroke-opacity: 0.4;
+  }
+  .av-borde-zona {
+    fill: none;
+    stroke: var(--color-cal);
+    stroke-width: 2.5;
+    stroke-linejoin: round;
+  }
+  .av-rotulo {
+    position: absolute;
+    transform: translate(-50%, -50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: max-content;
+    max-width: 42%;
+    padding: 2px 6px;
+    border-radius: 3px;
+    background: rgb(30 42 48 / 0.86);
+    color: var(--color-cal);
+    font-size: clamp(11px, 3.4cqi, 14px);
+    line-height: 1.2;
+    text-align: center;
+    pointer-events: none;
+  }
+  .av-rotulo-nombre {
+    font-weight: 700;
+  }
+  .av-rotulo-estado {
+    color: var(--color-texto-oscuro);
+  }
+  .av-rotulo-derecha {
+    transform: translateY(-50%);
+    align-items: flex-end;
+    text-align: right;
+  }
+  .av-rotulo-costa {
+    background: rgb(30 42 48 / 0.7);
+  }
+  .av-leyenda ul {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 18px;
+    font-size: 14px;
+  }
+  .av-leyenda li {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .av-leyenda .nota {
+    margin: 8px 0 0;
+  }
+  .av-muestra {
+    display: inline-block;
+    width: 22px;
+    height: 14px;
+    border-radius: 2px;
+  }
+  .av-muestra-rayada {
+    background: repeating-linear-gradient(45deg, #f2c230 0 5px, #263840 5px 11px);
+  }
+  .av-muestra-sin {
+    background: var(--color-basalto-2);
+    border: 1px solid var(--color-borde-oscuro);
+  }
+
+  /* Contenido */
+  .av-contenido {
+    padding-block: 32px 24px;
+  }
+  @media (min-width: 48rem) {
+    .av-contenido {
+      padding-block: 48px 32px;
+    }
+  }
+  .av-seccion {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .av-seccion h2 {
+    margin: 0;
+  }
+
+  /* Tarjetas de aviso */
+  .av-tarjetas {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr));
+    gap: 16px;
+  }
+  .av-tarjeta {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 16px 18px;
+    background: var(--color-blanco);
+    border: 1px solid var(--color-linea);
+    border-left: 6px solid;
+    border-radius: 0 4px 4px 0;
+  }
+  .av-tarjeta-cabecera {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 12px;
+  }
+  .av-tarjeta-titulo {
+    margin: 0;
+  }
+  .av-cuando {
+    margin: 0;
+    font-size: 16px;
+    line-height: 1.5;
+  }
+  .av-tarjeta-datos {
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    font-size: 15px;
+  }
+  .av-tarjeta-datos > div {
+    display: grid;
+    grid-template-columns: 110px minmax(0, 1fr);
+    gap: 12px;
+    padding-top: 8px;
+    border-top: 1px solid var(--color-linea);
+  }
+  .av-tarjeta-datos dt {
+    color: var(--color-ceniza);
+  }
+  .av-tarjeta-datos dd {
+    margin: 0;
+  }
+  .av-tarjeta-texto {
+    margin: 0;
+    font-size: 15px;
+    line-height: 1.55;
+  }
+
+  /* Zonas */
+  .av-grupo-zonas {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .av-grupo-titulo {
+    margin: 8px 0 0;
+    font-size: 18px;
+  }
+  .av-zonas {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr));
+    gap: 16px 24px;
+  }
+  .av-zona {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding-top: 12px;
+    border-top: 6px solid var(--color-linea);
+  }
+  .av-zona-nombre {
+    margin: 0;
+    font-size: 18px;
+  }
+  .av-zona-estado {
+    margin: 0;
+    font-size: 15px;
+  }
+  .av-zona-avisos {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-size: 15px;
+  }
+  .av-zona-avisos a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    font-weight: 600;
+  }
+
+  /* Tabla de municipios */
+  .av-tabla summary {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    text-decoration: underline;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 0.18em;
+  }
+  .av-tabla summary:hover {
+    color: var(--color-almagra);
+  }
+  .av-tabla[open] summary {
+    margin-bottom: 12px;
+  }
+  .av-tabla-scroll {
+    background: var(--color-blanco);
+    border: 1px solid var(--color-linea);
+    border-radius: 4px;
+    padding: 4px 16px 0;
+  }
+  .av-tabla-tabla {
+    min-width: 640px;
+    font-size: 15px;
+  }
+  .av-tabla-tabla tbody th,
+  .av-tabla-tabla tbody td {
+    padding-block: 4px;
+  }
+  .av-tabla-tabla tbody th a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+  .av-celda-nivel {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+  }
+  .av-punto {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border: 1px solid;
+    border-radius: 50%;
+  }
+
+  /* Niveles */
+  .av-niveles {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr));
+    gap: 16px 24px;
+  }
+  .av-nivel-item {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding-top: 12px;
+    border-top: 6px solid;
+    line-height: 1.55;
+    color: var(--color-gris-texto);
+  }
+  .av-fuente {
+    gap: 8px;
+  }
+</style>

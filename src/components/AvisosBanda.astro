@@ -1,0 +1,208 @@
+---
+// Banda compacta con los avisos de AEMET (Meteoalerta) en vigor y los que empiezan pronto.
+// Con `municipio`, solo los de sus zonas (tierra y, si tiene costa, costeras); sin él, los de toda la provincia.
+// Si no hay ninguno (o no hay avisos.json), no pinta nada. Se calcula en el build y, por si la página publicada
+// lleva tiempo sin regenerarse, un script oculta en el navegador los avisos que ya han terminado.
+import {
+  NOMBRE_NIVEL,
+  VAR_NIVEL,
+  COLOR_NIVEL,
+  avisosActivos,
+  avisosDeMunicipio,
+  getAvisos,
+  nivelMaximo,
+  textoCuando,
+  textoParametros,
+  textoZonas,
+  tituloAviso,
+  type Aviso,
+} from "../lib/avisos";
+
+type Props = {
+  // Municipio (código INE y nombre): solo sus avisos. Sin él, los de la provincia.
+  municipio?: { id: string; nombre: string };
+  // Incluir los avisos que empiezan en las próximas `horasProximos` horas (0: solo los vigentes)
+  horasProximos?: number;
+  // "caja" (por defecto): bloque dentro del contenido. "completo": franja a todo el ancho con .contenedor dentro.
+  ancho?: "caja" | "completo";
+  // Avisos que se listan como mucho (el resto se resume en "y N avisos más")
+  maximo?: number;
+};
+
+const { municipio, horasProximos = 24, ancho = "caja", maximo = 3 } = Astro.props;
+const base = import.meta.env.BASE_URL;
+const ahora = new Date();
+
+const datos = getAvisos();
+const { vigentes, proximos, zonas } = datos
+  ? municipio
+    ? avisosDeMunicipio(municipio.id, ahora)
+    : { ...avisosActivos(ahora), zonas: null as string[] | null }
+  : { vigentes: [], proximos: [], zonas: null };
+const limite = ahora.getTime() + horasProximos * 3_600_000;
+const pronto = horasProximos > 0 ? proximos.filter((a) => Date.parse(a.inicio) <= limite) : [];
+const lista: Aviso[] = [...vigentes, ...pronto];
+const mostrados = lista.slice(0, maximo);
+const resto = lista.length - mostrados.length;
+const nivel = nivelMaximo(lista);
+
+// Zonas que se nombran en cada aviso: en un municipio, solo las suyas
+const zonasDe = (a: Aviso) => (zonas ? a.zonas.filter((z) => zonas.includes(z.codigo)) : a.zonas);
+const textoDonde = (a: Aviso) => {
+  const zs = zonasDe(a);
+  if (!zs.length) return null;
+  return `${zs.length === 1 ? "Zona" : "Zonas"}: ${textoZonas(zs)}`;
+};
+const vigente = (a: Aviso) => Date.parse(a.inicio) <= ahora.getTime();
+
+const titulo = municipio
+  ? `Avisos de AEMET para ${municipio.nombre}`
+  : "Avisos de AEMET en la provincia";
+const idTitulo = `avisos-banda-${municipio?.id ?? "provincia"}`;
+---
+
+{
+  nivel && (
+    <section
+      class:list={["avisos-banda", ancho === "completo" ? "avisos-banda-completa" : "avisos-banda-caja"]}
+      aria-labelledby={idTitulo}
+      data-avisos-banda
+      style={`--ab-fondo:${VAR_NIVEL[nivel].fondo};--ab-borde:${VAR_NIVEL[nivel].borde}`}
+    >
+      <div class:list={["avisos-banda-cuerpo", { contenedor: ancho === "completo" }]}>
+        <h2 id={idTitulo} class="sr-only">
+          {titulo}
+        </h2>
+        <ul class="avisos-banda-lista" role="list">
+          {mostrados.map((a) => (
+            <li class="avisos-banda-item" data-fin={a.fin} data-inicio={a.inicio}>
+              <span
+                class="avisos-banda-nivel"
+                style={`background:${VAR_NIVEL[a.nivel].marca};color:${COLOR_NIVEL[a.nivel].tinta};border-color:${VAR_NIVEL[a.nivel].borde}`}
+              >
+                {NOMBRE_NIVEL[a.nivel]}
+              </span>
+              <p class="avisos-banda-texto">
+                <strong>{tituloAviso(a)}</strong>
+                <span class="avisos-banda-cuando">
+                  {vigente(a) ? "En vigor. " : "Previsto. "}
+                  {textoCuando(a, ahora)}.
+                </span>
+                {textoDonde(a) && <span class="avisos-banda-detalle">{textoDonde(a)}.</span>}
+                {textoParametros(a).slice(0, 2).map((t) => (
+                  <span class="avisos-banda-detalle">{t}.</span>
+                ))}
+              </p>
+            </li>
+          ))}
+        </ul>
+        <p class="avisos-banda-pie">
+          {resto > 0 && <span>Y {resto === 1 ? "1 aviso más" : `${resto} avisos más`}. </span>}
+          <a class="enlace-fuerte avisos-banda-enlace" href={`${base}avisos/`}>
+            Ver todos los avisos
+          </a>
+        </p>
+      </div>
+    </section>
+  )
+}
+
+<script is:inline>
+  // Oculta los avisos que ya han terminado (y la banda si no queda ninguno) cuando la página es antigua
+  (function () {
+    var ahora = Date.now();
+    document.querySelectorAll("[data-avisos-banda]").forEach(function (banda) {
+      var items = banda.querySelectorAll("[data-fin]");
+      var quedan = 0;
+      items.forEach(function (li) {
+        var fin = Date.parse(li.getAttribute("data-fin") || "");
+        if (fin <= ahora) li.hidden = true;
+        else quedan++;
+      });
+      if (items.length && !quedan) banda.hidden = true;
+    });
+  })();
+</script>
+
+<style>
+  .avisos-banda {
+    background: var(--ab-fondo);
+    color: var(--color-basalto);
+  }
+  .avisos-banda-caja {
+    border-left: 4px solid var(--ab-borde);
+    border-radius: 0 4px 4px 0;
+    padding: 12px 16px;
+  }
+  .avisos-banda-completa {
+    border-top: 4px solid var(--ab-borde);
+    border-bottom: 1px solid var(--color-linea);
+  }
+  .avisos-banda-completa > .avisos-banda-cuerpo {
+    padding-block: 12px;
+  }
+  .avisos-banda-cuerpo {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 8px 24px;
+  }
+  .avisos-banda-lista {
+    flex: 1 1 520px;
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .avisos-banda-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+  }
+  .avisos-banda-nivel {
+    flex: 0 0 auto;
+    min-width: 76px;
+    margin-top: 1px;
+    padding: 2px 8px;
+    border: 1px solid;
+    border-radius: 3px;
+    font-size: 14px;
+    font-weight: 700;
+    text-align: center;
+  }
+  .avisos-banda-texto {
+    margin: 0;
+    min-width: 0;
+    font-size: 15px;
+    line-height: 1.45;
+  }
+  .avisos-banda-texto strong {
+    display: block;
+    font-size: 16px;
+  }
+  .avisos-banda-cuando {
+    margin-right: 6px;
+    font-weight: 600;
+  }
+  .avisos-banda-detalle {
+    margin-right: 6px;
+    color: var(--color-gris-texto);
+  }
+  .avisos-banda-pie {
+    flex: 0 0 auto;
+    margin: 0;
+    font-size: 15px;
+  }
+  .avisos-banda-enlace {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+  .avisos-banda a:hover {
+    color: var(--color-almagra-oscuro);
+  }
+</style>
