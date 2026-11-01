@@ -1,0 +1,271 @@
+{
+  "_comentario": "Playas de AEMET de la provincia de Almería (fichero maestro Playas_codigos.csv, ID_PROVINCIA = 04) con el municipio de scripts/municipios-almeria.json. Se regenera con: npx tsx scripts/fuentes/playas.ts --maestro",
+  "fuente": "https://www.aemet.es/documentos/es/eltiempo/prediccion/playas/Playas_codigos.csv",
+  "generado": "2026-10-31",
+  "playas": [
+    {
+      "id": "0400308",
+      "nombre": "Poniente",
+      "slug": "poniente",
+      "municipio": {
+        "id": "04003",
+        "slug": "adra",
+        "nombre": "Adra"
+      },
+      "lat": 36.74417,
+      "lon": -3.185
+    },
+    {
+      "id": "0400309",
+      "nombre": "San Nicolás",
+      "slug": "san-nicolas",
+      "municipio": {
+        "id": "04003",
+        "slug": "adra",
+        "nombre": "Adra"
+      },
+      "lat": 36.74444,
+      "lon": -3.06694
+    },
+    {
+      "id": "0401310",
+      "nombre": "Retamar",
+      "slug": "retamar",
+      "municipio": {
+        "id": "04013",
+        "slug": "almeria",
+        "nombre": "Almería"
+      },
+      "lat": 36.83361,
+      "lon": -2.31472
+    },
+    {
+      "id": "0401313",
+      "nombre": "San Miguel de Cabo de Gata",
+      "slug": "san-miguel-de-cabo-de-gata",
+      "municipio": {
+        "id": "04013",
+        "slug": "almeria",
+        "nombre": "Almería"
+      },
+      "lat": 36.79306,
+      "lon": -2.25583
+    },
+    {
+      "id": "0401304",
+      "nombre": "San Miguel/Las Conchas/Zapillo",
+      "slug": "san-miguel-las-conchas-zapillo",
+      "municipio": {
+        "id": "04013",
+        "slug": "almeria",
+        "nombre": "Almería"
+      },
+      "lat": 36.82944,
+      "lon": -2.45278
+    },
+    {
+      "id": "0402901",
+      "nombre": "Berja-Balanegra",
+      "slug": "berja-balanegra",
+      "municipio": {
+        "id": "04029",
+        "slug": "berja",
+        "nombre": "Berja"
+      },
+      "lat": 36.7475,
+      "lon": -2.91056
+    },
+    {
+      "id": "0403203",
+      "nombre": "El Lancon",
+      "slug": "el-lancon",
+      "municipio": {
+        "id": "04032",
+        "slug": "carboneras",
+        "nombre": "Carboneras"
+      },
+      "lat": 37.01139,
+      "lon": -1.88083
+    },
+    {
+      "id": "0403204",
+      "nombre": "Los Barquicos/Los Cocones",
+      "slug": "los-barquicos-los-cocones",
+      "municipio": {
+        "id": "04032",
+        "slug": "carboneras",
+        "nombre": "Carboneras"
+      },
+      "lat": 36.99639,
+      "lon": -1.89361
+    },
+    {
+      "id": "0403501",
+      "nombre": "Pozo del Esparto",
+      "slug": "pozo-del-esparto",
+      "municipio": {
+        "id": "04035",
+        "slug": "cuevas-del-almanzora",
+        "nombre": "Cuevas del Almanzora"
+      },
+      "lat": 37.33639,
+      "lon": -1.68972
+    },
+    {
+      "id": "0403510",
+      "nombre": "Villaricos",
+      "slug": "villaricos",
+      "municipio": {
+        "id": "04035",
+        "slug": "cuevas-del-almanzora",
+        "nombre": "Cuevas del Almanzora"
+      },
+      "lat": 37.2475,
+      "lon": -1.77194
+    },
+    {
+      "id": "0490201",
+      "nombre": "Balerma",
+      "slug": "balerma",
+      "municipio": {
+        "id": "04902",
+        "slug": "el-ejido",
+        "nombre": "El Ejido"
+      },
+      "lat": 36.72222,
+      "lon": -2.8775
+    },
+    {
+      "id": "0490205",
+      "nombre": "Levante Almerimar",
+      "slug": "levante-almerimar",
+      "municipio": {
+        "id": "04902",
+        "slug": "el-ejido",
+        "nombre": "El Ejido"
+      },
+      "lat": 36.68972,
+      "lon": -2.77806
+    },
+    {
+      "id": "0490204",
+      "nombre": "San Miguel-Poniente Almerimar",
+      "slug": "san-miguel-poniente-almerimar",
+      "municipio": {
+        "id": "04902",
+        "slug": "el-ejido",
+        "nombre": "El Ejido"
+      },
+      "lat": 36.7075,
+      "lon": -2.81472
+    },
+    {
+      "id": "0404901",
+      "nombre": "Garrucha",
+      "slug": "garrucha",
+      "municipio": {
+        "id": "04049",
+        "slug": "garrucha",
+        "nombre": "Garrucha"
+      },
+      "lat": 37.17917,
+      "lon": -1.82028
+    },
+    {
+      "id": "0406403",
+      "nombre": "El Descargador",
+      "slug": "el-descargador",
+      "municipio": {
+        "id": "04064",
+        "slug": "mojacar",
+        "nombre": "Mojácar"
+      },
+      "lat": 37.14194,
+      "lon": -1.82611
+    },
+    {
+      "id": "0406401",
+      "nombre": "Marina de la Torre",
+      "slug": "marina-de-la-torre",
+      "municipio": {
+        "id": "04064",
+        "slug": "mojacar",
+        "nombre": "Mojácar"
+      },
+      "lat": 37.1625,
+      "lon": -1.8225
+    },
+    {
+      "id": "0406601",
+      "nombre": "Aguamarga",
+      "slug": "aguamarga",
+      "municipio": {
+        "id": "04066",
+        "slug": "nijar",
+        "nombre": "Níjar"
+      },
+      "lat": 36.94,
+      "lon": -1.93361
+    },
+    {
+      "id": "0406614",
+      "nombre": "San José",
+      "slug": "san-jose",
+      "municipio": {
+        "id": "04066",
+        "slug": "nijar",
+        "nombre": "Níjar"
+      },
+      "lat": 36.76028,
+      "lon": -2.10722
+    },
+    {
+      "id": "0407506",
+      "nombre": "Mar Serena",
+      "slug": "mar-serena",
+      "municipio": {
+        "id": "04075",
+        "slug": "pulpi",
+        "nombre": "Pulpí"
+      },
+      "lat": 37.35833,
+      "lon": -1.66972
+    },
+    {
+      "id": "0407904",
+      "nombre": "La Romanilla",
+      "slug": "la-romanilla",
+      "municipio": {
+        "id": "04079",
+        "slug": "roquetas-de-mar",
+        "nombre": "Roquetas de Mar"
+      },
+      "lat": 36.77056,
+      "lon": -2.60139
+    },
+    {
+      "id": "0407906",
+      "nombre": "Urbanización Roquetas del Mar",
+      "slug": "urbanizacion-roquetas-del-mar",
+      "municipio": {
+        "id": "04079",
+        "slug": "roquetas-de-mar",
+        "nombre": "Roquetas de Mar"
+      },
+      "lat": 36.74028,
+      "lon": -2.61083
+    },
+    {
+      "id": "0410002",
+      "nombre": "Puerto del Rey",
+      "slug": "puerto-del-rey",
+      "municipio": {
+        "id": "04100",
+        "slug": "vera",
+        "nombre": "Vera"
+      },
+      "lat": 37.20278,
+      "lon": -1.80944
+    }
+  ]
+}
