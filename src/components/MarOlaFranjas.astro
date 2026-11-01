@@ -35,14 +35,17 @@ const filas = puntos.map((p) => {
 });
 
 // Medianoches (separadores) y días: la etiqueta solo si el tramo del día es lo bastante ancho para que no se pise
+// (10 h en escritorio; en móvil, 18 h, porque a 390 px "Ahora" y "Mañana" se tocan y el último día se corta)
 const medianoches = horas.flatMap((t, i) => (i > 0 && t.slice(11, 13) === "00" ? [i] : []));
 const inicios = [0, ...medianoches];
 const dias = inicios
   .map((i, k) => ({ i, ancho: (inicios[k + 1] ?? n) - i, etiqueta: etiquetaDia(horas[i].slice(0, 10), ahoraLocal), corta: corta(horas[i].slice(0, 10), ahoraLocal) }))
-  .filter((d) => d.ancho >= 10);
+  .filter((d) => d.ancho >= 10)
+  .map((d) => ({ ...d, movil: d.ancho >= 18 }));
 const marcas = horas.flatMap((t, i) => {
   const h = t.slice(11, 13);
-  return h === "06" || h === "12" || h === "18" ? [{ i, h, principal: h === "12" }] : [];
+  // Sin marcas pegadas a los bordes: centradas sobre su hora, se cortarían ("2 h" en vez de "12 h")
+  return (h === "06" || h === "12" || h === "18") && i >= 3 && i <= n - 3 ? [{ i, h, principal: h === "12" }] : [];
 });
 const sinDato = filas.some((f) => f.tramos.some((t) => t.fondo == null));
 ---
@@ -55,7 +58,7 @@ const sinDato = filas.some((f) => f.tramos.some((t) => t.fondo == null));
           <span />
           <div class="relative h-6 overflow-hidden text-[13px] font-bold">
             {dias.map((d) => (
-              <span class="absolute top-0 whitespace-nowrap pl-1.5" style={`left:${pct(d.i)}`}>
+              <span class:list={["absolute top-0 whitespace-nowrap pl-1.5", { "max-md:hidden": !d.movil }]} style={`left:${pct(d.i)}`}>
                 {d.i === 0 ? (
                   "Ahora"
                 ) : (

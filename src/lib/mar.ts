@@ -94,10 +94,15 @@ export const ESTADOS_MAR: EstadoMar[] = [
   { id: "enorme", nombre: "Enorme", hasta: null, rango: "más de 14 m", tramo: 5 },
 ];
 
-/** Estado de la mar para una altura de ola en metros (null si falta). Por debajo de 0,05 m cuenta como calma. */
-export function estadoMar(altura: number | null | undefined): EstadoMar | null {
-  if (altura == null || !Number.isFinite(altura)) return null;
-  if (altura < 0.05) return ESTADOS_MAR[0];
+/**
+ * Estado de la mar para una altura de ola en metros (null si falta). Por debajo de 0,05 m cuenta como calma.
+ * Se calcula con la altura redondeada a 1 decimal, la que se muestra (fmtAltura), para que "0,5 m" sea siempre
+ * marejadilla y nunca salgan dos estados distintos para la misma cifra.
+ */
+export function estadoMar(alturaBruta: number | null | undefined): EstadoMar | null {
+  if (alturaBruta == null || !Number.isFinite(alturaBruta)) return null;
+  if (alturaBruta < 0.05) return ESTADOS_MAR[0];
+  const altura = Math.round(alturaBruta * 10) / 10;
   return ESTADOS_MAR.slice(1).find((e) => e.hasta == null || altura <= e.hasta) ?? ESTADOS_MAR[ESTADOS_MAR.length - 1];
 }
 

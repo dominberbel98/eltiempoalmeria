@@ -2,7 +2,8 @@
 // Bloque "Por comarcas" (portada y /comarcas/): una tarjeta por comarca con el tiempo de hoy en sus municipios
 // (cielo más frecuente, horquilla de máximas y mínimas, lluvia, rachas y tormenta) y enlace a su página.
 import IconoCielo from "./IconoCielo";
-import { UMBRAL_TORMENTA, resumenComarcas, type ComparativaComarca, type Extremo } from "../lib/comarcas";
+import { fmtLluvia } from "./mapa/escalas";
+import { UMBRAL_PROB_LLUVIA, UMBRAL_TORMENTA, resumenComarcas, type ComparativaComarca, type Extremo } from "../lib/comarcas";
 import { diaConNumero, fmt } from "../lib/tiempo";
 
 type Props = {
@@ -75,7 +76,13 @@ const tarjetas = comparativas.map((c) => {
               <ul class="rc-extra" role="list">
                 <li class="texto-lluvia">
                   {lluvia}
-                  {r.probMax && r.conLluvia > 0 && `, con una probabilidad de hasta el ${fmt(r.probMax.valor, " %")}`}
+                  {/* La probabilidad solo si llega al umbral: un municipio cuenta "con lluvia" también por 0,1 mm del modelo */}
+                  {r.conLluvia > 0 &&
+                    (r.probMax && r.probMax.valor >= UMBRAL_PROB_LLUVIA
+                      ? `, con una probabilidad de hasta el ${fmt(r.probMax.valor, " %")}`
+                      : r.precipMax && r.precipMax.valor >= 0.1
+                        ? `, hasta ${fmtLluvia(r.precipMax.valor)}`
+                        : "")}
                 </li>
                 {r.rachaMax && <li>Rachas de hasta {fmt(r.rachaMax.valor, " km/h")}</li>}
                 {tormenta && (

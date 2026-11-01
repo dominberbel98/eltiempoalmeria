@@ -6,7 +6,17 @@ import archivoLatin from "@fontsource-variable/archivo/files/archivo-latin-wdth-
 import { getMeta } from "../lib/datos";
 import { horasDesde, textoActualizacion } from "../lib/tiempo";
 
-type Seccion = "prevision" | "mapa" | "radar" | "agro";
+type Seccion =
+  | "prevision"
+  | "mapa"
+  | "radar"
+  | "avisos"
+  | "playas"
+  | "mar"
+  | "calima"
+  | "comarcas"
+  | "observaciones"
+  | "agro";
 type Props = {
   title: string;
   description: string;
@@ -27,14 +37,26 @@ const meta = getMeta();
 const canonical = new URL(Astro.url.pathname, Astro.site).href;
 const conBuscador = Astro.slots.has("buscador");
 
-const secciones: { id: Seccion; texto: string; href: string }[] = [
+type EnlaceSeccion = { id: Seccion; texto: string; href: string };
+// Secciones de la cabecera. En escritorio las "principales" van en la fila y el resto en el desplegable "Más";
+// en móvil (menú plegable) y sin JS se ven todas en la misma lista. El pie repite la lista completa.
+const principales: EnlaceSeccion[] = [
   { id: "prevision", texto: "Previsión", href: base },
   { id: "mapa", texto: "Mapa", href: `${base}mapa/` },
   { id: "radar", texto: "Radar", href: `${base}radar/` },
+  { id: "avisos", texto: "Avisos", href: `${base}avisos/` },
+  { id: "playas", texto: "Playas", href: `${base}playas/` },
+  { id: "mar", texto: "Mar", href: `${base}mar/` },
+];
+const mas: EnlaceSeccion[] = [
+  { id: "calima", texto: "Calima", href: `${base}calima/` },
+  { id: "comarcas", texto: "Comarcas", href: `${base}comarcas/` },
+  { id: "observaciones", texto: "Observaciones", href: `${base}observaciones/` },
   { id: "agro", texto: "Agro", href: `${base}agro/` },
 ];
 // "page" si el enlace es esta misma página; "true" si es la sección a la que pertenece (p. ej. un municipio en Previsión)
-const actual = (s: (typeof secciones)[number]) => (s.id !== activo ? undefined : Astro.url.pathname === s.href ? "page" : "true");
+const actual = (s: EnlaceSeccion) => (s.id !== activo ? undefined : Astro.url.pathname === s.href ? "page" : "true");
+const masActivo = mas.some((s) => s.id === activo);
 
 // Aviso si el dato más reciente tiene más de 2 h. Se calcula en el build y se repite en el navegador,
 // por si la página publicada se queda sin regenerar.
@@ -95,7 +117,42 @@ const jsonLdTexto = jsonLd ? JSON.stringify(jsonLd).replace(/</g, "\\u003c") : n
         </button>
       </div>
       <nav id="menu-principal" class="nav-principal" aria-label="Principal">
-        {secciones.map((s) => <a href={s.href} aria-current={actual(s)}>{s.texto}</a>)}
+        <ul class="nav-lista">
+          {
+            principales.map((s) => (
+              <li>
+                <a href={s.href} aria-current={actual(s)}>
+                  {s.texto}
+                </a>
+              </li>
+            ))
+          }
+          <li class="nav-mas">
+            <button
+              type="button"
+              class:list={["nav-mas-boton", { actual: masActivo }]}
+              aria-expanded="false"
+              aria-controls="menu-mas"
+              data-despliega="mas"
+            >
+              Más<span class="sr-only"> secciones</span>
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+                <path d="m2.5 4.5 3.5 3.5 3.5-3.5" />
+              </svg>
+            </button>
+            <ul id="menu-mas" class="nav-mas-lista">
+              {
+                mas.map((s) => (
+                  <li>
+                    <a href={s.href} aria-current={actual(s)}>
+                      {s.texto}
+                    </a>
+                  </li>
+                ))
+              }
+            </ul>
+          </li>
+        </ul>
       </nav>
       {
         conBuscador && (
@@ -142,6 +199,17 @@ const jsonLdTexto = jsonLd ? JSON.stringify(jsonLd).replace(/</g, "\\u003c") : n
           )
         }
       </div>
+      <nav class="pie-secciones" aria-label="Todas las secciones">
+        <ul>
+          {
+            [...principales, ...mas].map((s) => (
+              <li>
+                <a href={s.href}>{s.texto}</a>
+              </li>
+            ))
+          }
+        </ul>
+      </nav>
       <div class="pie-estado">
         <p>
           {
@@ -172,6 +240,18 @@ const jsonLdTexto = jsonLd ? JSON.stringify(jsonLd).replace(/</g, "\\u003c") : n
           for (const otro of botones) if (otro !== boton) poner(otro, false);
           poner(boton, abrir);
           if (abrir && boton.dataset.despliega === "buscador") panel(boton)?.querySelector<HTMLInputElement>("input")?.focus();
+        });
+      }
+      // El desplegable "Más secciones" (escritorio) se cierra al pulsar fuera o al salir el foco de él
+      const mas = document.querySelector<HTMLButtonElement>('[data-despliega="mas"]');
+      const contenedorMas = mas?.closest(".nav-mas");
+      if (mas && contenedorMas) {
+        document.addEventListener("click", (e) => {
+          if (mas.getAttribute("aria-expanded") === "true" && !contenedorMas.contains(e.target as Node)) poner(mas, false);
+        });
+        contenedorMas.addEventListener("focusout", (e) => {
+          const destino = (e as FocusEvent).relatedTarget as Node | null;
+          if (destino && !contenedorMas.contains(destino)) poner(mas, false);
         });
       }
       document.addEventListener("keydown", (e) => {

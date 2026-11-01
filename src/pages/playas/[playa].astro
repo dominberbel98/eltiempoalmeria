@@ -160,7 +160,7 @@ const jsonLd = {
 };
 ---
 
-<Base title={titulo} description={descripcion} jsonLd={jsonLd}>
+<Base title={titulo} description={descripcion} jsonLd={jsonLd} activo="playas">
   <nav class="migas" aria-label="Migas de pan">
     <a href={base}><span class="migas-largo">Provincia de Almería</span><span class="migas-corto">Provincia</span></a> /{" "}
     <a href={`${base}playas/`}>Playas</a> / <span aria-current="page">{p.nombre}</span>
@@ -170,7 +170,7 @@ const jsonLd = {
     <div class="flex min-w-0 flex-[1_1_480px] flex-col gap-3.5">
       <h1 id="t-playa" class="titular text-[clamp(3.5rem,2.4rem+3.6vw,5.5rem)] leading-[0.88] [overflow-wrap:anywhere]">{p.nombre}</h1>
       <p class="text-lg leading-normal text-gris-texto">
-        Playa de <a href={`${base}${m.slug}/`}>{m.nombre}</a>{comarca ? `, ${comarca.nombre}` : ", Almería"}
+        Playa de <a href={`${base}${m.slug}/`}>{m.nombre}</a>{comarca ? <>, <a href={`${base}comarcas/${comarca.slug}/`}>{comarca.nombre}</a></> : ", Almería"}
       </p>
     </div>
     <div class="sobre-oscuro flex min-w-0 flex-[1_1_360px] flex-col gap-3 rounded-[4px] bg-basalto px-7 py-6">
@@ -430,7 +430,9 @@ const jsonLd = {
           comarca && (
             <div class="flex justify-between gap-4 border-b border-linea pb-2.5">
               <dt class="text-ceniza">Comarca</dt>
-              <dd class="m-0 text-right font-bold">{comarca.nombre}</dd>
+              <dd class="m-0 text-right font-bold">
+                <a href={`${base}comarcas/${comarca.slug}/`}>{comarca.nombre}</a>
+              </dd>
             </div>
           )
         }

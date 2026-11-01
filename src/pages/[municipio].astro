@@ -20,6 +20,8 @@ import { cercanos, fichas, sinAemet, type Ficha } from "../lib/resumen";
 import { aMeteograma, fmt, horaLocal } from "../lib/tiempo";
 import { diferencias, getArchivoZonas, resumenDiario, tieneVistaZonas, zonasDeMunicipio } from "../lib/zonas";
 import { comarcaDeMunicipio } from "../lib/comarcas";
+import { puntosDeMunicipio } from "../lib/mar";
+import { calimaDeMunicipio } from "../lib/calima";
 
 export function getStaticPaths() {
   return fichas().map((ficha) => ({ params: { municipio: ficha.municipio.slug }, props: { ficha } }));
@@ -64,6 +66,11 @@ const subtitulo = `${m.id === "04013" ? "Capital de la provincia" : "Provincia d
 const vecinos = cercanos(m, 8);
 const comarca = comarcaDeMunicipio(m.id);
 const tormenta = p.horas.some((h) => h.tormenta != null);
+// Enlaces a otras secciones según el municipio: oleaje en sus puntos de costa y calima si se espera en los próximos días
+const puntosCosta = puntosDeMunicipio(m.id);
+const calima = calimaDeMunicipio(m.id);
+const nivelCalima = calima?.peorDia?.nivel;
+const conCalima = nivelCalima != null && nivelCalima !== "sin";
 
 const descripcion = `Previsión del tiempo en ${m.nombre} (Almería) hora a hora: temperatura, lluvia, viento y rachas, humedad, UV y nubosidad para 48 horas y los próximos 7 días.${
   hoy ? ` Hoy, máxima de ${fmt(hoy.max, "°")} y mínima de ${fmt(hoy.min, "°")}.` : ""
@@ -209,6 +216,15 @@ const jsonLd = {
     <nav class="cerca-secciones" aria-label="Secciones">
       <a class="boton" href={`${base}mapa/`}>Mapa por horas</a>
       <a class="boton" href={`${base}radar/`}>Radar</a>
+      {
+        puntosCosta.map((pc) => (
+          <a class="boton" href={`${base}mar/#punto-${pc.id}`}>
+            Oleaje en {pc.nombre}
+          </a>
+        ))
+      }
+      {conCalima && <a class="boton" href={`${base}calima/`}>Calima</a>}
+      <a class="boton" href={`${base}observaciones/`}>Observaciones</a>
     </nav>
   </section>
 

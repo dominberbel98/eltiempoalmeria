@@ -65,6 +65,25 @@
   --container-pagina: 80rem; /* 1280 px: max-w-pagina */
 }
 
+/* Niveles de aviso de AEMET, en un bloque `static` para que se emitan siempre: src/lib/avisos.ts (VAR_NIVEL) compone
+   el nombre de la variable y Tailwind no lo ve al buscar usos. */
+@theme static {
+  /* Niveles de aviso de AEMET. Mismos valores que COLOR_NIVEL de src/lib/avisos.ts (VAR_NIVEL los usa con respaldo).
+     marca: relleno con texto basalto (rojo: blanco); fondo: tarjeta; texto: nivel escrito sobre su fondo; borde: filete */
+  --color-aviso-amarillo: #f2c230;
+  --color-aviso-amarillo-fondo: #fbf0c9;
+  --color-aviso-amarillo-texto: #735600;
+  --color-aviso-amarillo-borde: #9c7700;
+  --color-aviso-naranja: #ec8a3c;
+  --color-aviso-naranja-fondo: #fce3cf;
+  --color-aviso-naranja-texto: #93430c;
+  --color-aviso-naranja-borde: #c9631c;
+  --color-aviso-rojo: #c62a2a;
+  --color-aviso-rojo-fondo: #f9dddd;
+  --color-aviso-rojo-texto: #a01c1c;
+  --color-aviso-rojo-borde: #c62a2a;
+}
+
 /* Anchura condensada de Archivo para titulares y cifras (admite variantes: md:estrecha) */
 @utility estrecha {
   font-stretch: 62%;
@@ -640,11 +659,17 @@
     display: flex;
     gap: 4px;
   }
+  /* Navegación: en móvil, lista vertical plegable con todas las secciones (el botón "Más" no se ve);
+     en escritorio, fila con las principales y el resto en el desplegable "Más" (#menu-mas). */
   .nav-principal {
     flex: 1 0 100%;
-    display: flex;
-    flex-direction: column;
     padding-top: 8px;
+  }
+  .nav-lista,
+  .nav-mas-lista {
+    margin: 0;
+    padding: 0;
+    list-style: none;
   }
   .nav-principal a {
     display: flex;
@@ -658,6 +683,9 @@
   .nav-principal a[aria-current] {
     font-weight: 700;
     border-left-color: var(--color-almagra);
+  }
+  .nav-mas-boton {
+    display: none;
   }
   .cabecera-buscador {
     flex: 1 0 100%;
@@ -686,25 +714,100 @@
     .cabecera-botones {
       display: none;
     }
-    .nav-principal {
-      flex: 1 1 auto;
-      flex-direction: row;
-      gap: 28px;
+    /* Dos filas: logo y buscador arriba, secciones debajo (las 7 entradas y el buscador no caben en una a 1280 px) */
+    .cabecera-buscador {
+      flex: 0 1 360px;
+      margin-left: auto;
       padding-top: 0;
     }
-    .nav-principal a {
+    .nav-principal {
+      order: 3;
+      flex: 1 0 100%;
+      padding-top: 0;
+      margin-top: -8px;
+    }
+    .nav-lista {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0 28px;
+    }
+    .nav-lista > li > a,
+    .nav-mas-boton {
       min-height: 44px;
       padding: 10px 0 4px;
       border-top: 0;
       border-left: 0;
       border-bottom: 3px solid transparent;
     }
-    .nav-principal a[aria-current] {
+    .nav-lista > li > a[aria-current],
+    .nav-mas-boton.actual {
       border-bottom-color: var(--color-almagra);
     }
-    .cabecera-buscador {
-      flex: 0 1 360px;
-      padding-top: 0;
+    .nav-lista > li > a:hover,
+    .nav-mas-boton:hover {
+      color: var(--color-almagra);
+    }
+    .nav-mas {
+      position: relative;
+    }
+    html.js .nav-mas-boton {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: transparent;
+      color: inherit;
+      font: inherit;
+      cursor: pointer;
+    }
+    .nav-mas-boton.actual {
+      font-weight: 700;
+    }
+    .nav-mas-boton svg {
+      transition: transform 0.15s;
+    }
+    .nav-mas-boton[aria-expanded="true"] svg {
+      transform: rotate(180deg);
+    }
+    /* Sin JS, las secciones de "Más" siguen en la misma fila */
+    html:not(.js) .nav-mas-lista {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0 28px;
+    }
+    html:not(.js) .nav-mas-lista a {
+      min-height: 44px;
+      padding: 10px 0 4px;
+      border: 0;
+      border-bottom: 3px solid transparent;
+    }
+    html.js .nav-mas-lista {
+      position: absolute;
+      top: 100%;
+      left: -16px;
+      z-index: 1100;
+      min-width: 220px;
+      padding: 6px 0;
+      border: 1px solid var(--color-linea);
+      border-radius: 4px;
+      background: var(--color-blanco);
+      box-shadow: 0 8px 24px rgb(30 42 48 / 0.14);
+    }
+    html.js .nav-mas-lista:not(.abierto) {
+      display: none;
+    }
+    html.js .nav-mas-lista a {
+      border-top: 0;
+      padding-inline: 13px 16px;
+    }
+    html.js .nav-mas-lista a:hover {
+      background: var(--color-cal);
+      color: var(--color-almagra);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .nav-mas-boton svg {
+      transition: none;
     }
   }
 
@@ -756,6 +859,28 @@
     display: flex;
     flex-direction: column;
     gap: 8px;
+  }
+  .pie-secciones {
+    flex: 1 0 100%;
+    order: -1;
+  }
+  .pie-secciones ul {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0 20px;
+    margin: 0;
+    padding: 0 0 8px;
+    list-style: none;
+    border-bottom: 1px solid var(--color-linea);
+  }
+  .pie-secciones a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--color-basalto);
+    text-decoration: none;
   }
   .pie-estado {
     display: flex;

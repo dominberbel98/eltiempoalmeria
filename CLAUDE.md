@@ -58,7 +58,7 @@ Sitio estático: los datos se descargan en GitHub Actions, se generan las págin
 - `src/data/` y `public/radar/` están en `.gitignore`.
 - Si falta el dato de AEMET de un municipio, la página usa Open-Meteo y lo indica. Nunca se rompe el build por un municipio.
 - Mostrar siempre la hora de última actualización (`meta.updatedAt`: el dato de predicción u observación más reciente; la RIA no cuenta) y avisar si tiene más de 2 h.
-- Atribución obligatoria en el pie: "Información elaborada por la Agencia Estatal de Meteorología", "Weather data by Open-Meteo.com (CC BY 4.0)", IGN (CC BY 4.0) e INE; en `/agro/`, la de la RIA; en `/radar/`, "Radar de Almería (Níjar), © AEMET" con enlace al aviso legal.
+- Atribución obligatoria en el pie: "Información elaborada por la Agencia Estatal de Meteorología", "Weather data by Open-Meteo.com (CC BY 4.0)", IGN (CC BY 4.0) e INE; en `/agro/`, la de la RIA; en `/radar/`, "Radar de Almería (Níjar), © AEMET" con enlace al aviso legal; en `/playas/`, `ATRIBUCION_PLAYAS`; en `/mar/`, la del boletín FQXX47; en `/calima/`, `ATRIBUCION_CAMS` (Copernicus).
 - Fechas y horas en zona `Europe/Madrid`, formato español.
 - Copy en español, en frase normal. Prohibido en la interfaz: etiquetas en mayúsculas, cadenas "A · B · C", numeraciones decorativas, "→" en enlaces y emojis.
 - Accesibilidad: botones y enlaces reales, `aria-pressed` en conmutadores, contraste AA, objetivos táctiles ≥44 px, `prefers-reduced-motion`. Todo mapa o gráfica tiene alternativa en tabla o lista.
@@ -91,17 +91,27 @@ Endpoints generados en el build: `/mapa-horas.json` (48 h de los 103, con `torme
 
 ## Estructura de páginas
 
-- `/`: mapa provincial por horas (capas lluvia, probabilidad, viento, rachas, temperatura y tormenta; deslizador de 48 h; modo foco con las zonas de un municipio), "Ahora en Almería capital", "Hoy en la provincia" y "Tus municipios"
+- Navegación (`src/layouts/Base.astro`): en escritorio, logo y buscador en la primera fila y debajo Previsión, Mapa, Radar, Avisos, Playas, Mar y el desplegable "Más" (Calima, Comarcas, Observaciones, Agro; botón con `aria-expanded`, se cierra con Escape, al pulsar fuera o al salir el foco). En móvil, menú plegable con las 10 secciones en una lista; sin JS se ven todas. El pie repite las 10 secciones y la 404 también enlaza a todas. Cada página pasa `activo` con su sección (tipo `Seccion`).
+- `/`: banda de avisos (`AvisosBanda`, solo si hay avisos en vigor o en las próximas 24 h), mapa provincial por horas (capas lluvia, probabilidad, viento, rachas, temperatura y tormenta; deslizador de 48 h; modo foco con las zonas de un municipio), "Ahora en Almería capital", "Hoy en la provincia", "Por comarcas" (`ResumenComarcas`) y "Tus municipios"
 - `/mapa/`: el mapa provincial a pantalla amplia y la lista de los 103
-- `/[municipio]/`: cabecera con el ahora y datos clave, conmutador "Vista general" / "Por zonas" (`?vista=zonas&zona=<id>`, solo con 2 o más zonas), diferencias entre zonas, meteograma 24/48 h, tabla por horas plegada, semana, fuentes y municipios cercanos
+- `/[municipio]/`: migas con la comarca, banda de avisos de sus zonas, cabecera con el ahora y datos clave, conmutador "Vista general" / "Por zonas" (`?vista=zonas&zona=<id>`, solo con 2 o más zonas), diferencias entre zonas, meteograma 24/48 h, tabla por horas plegada, semana, "Playas de {municipio}" (`PlayasMunicipio`, en los 12 municipios con playas), fuentes, municipios cercanos y accesos a secciones (oleaje de sus puntos de costa en `/mar/#punto-{id}`, `/calima/` si se espera calima, observaciones)
 - `/radar/`: radar regional de AEMET con animación de las últimas imágenes
+- `/avisos/`: banda de basalto con el nivel más alto y el estado, mapa SVG de las 6 zonas (4 de tierra y 2 costeras; relleno del nivel en vigor, rayado si solo está previsto), tarjetas de avisos en vigor y previstos (`#aviso-N`), estado por zonas, tabla de los 103 municipios (alternativa del mapa), significado de los niveles y fuente
+- `/playas/`: las 22 playas de AEMET por municipio, a lo largo de la costa de Adra a Pulpí, con hoy y mañana (estado del mar, cielo, oleaje, viento, agua, máxima y UV), panel "Hoy en la costa" y filtros por comarca y "Solo mar en calma hoy"
+- `/playas/[playa]/`: ficha de cada playa con hoy y los días que da AEMET (mañana y tarde), altura de la ola del modelo en el punto de costa más cercano (≤30 km), dónde está, otras playas y datos estructurados `Beach`
+- `/mar/`: boletín costero FQXX47 de AEMET (aviso destacado, Costa Sur, Costa Oriental, Alborán), tabla "Ahora en la costa" de los 10 puntos, franjas SVG de oleaje de 72 h y detalle por punto cada 3 h (`#punto-{id}`); el estado Douglas se calcula con la ola redondeada a 1 decimal
+- `/calima/`: mapa SVG de los 103 términos por días con selector, gráfica provincial con umbrales, tabla por días (`#tabla-provincia`) y por municipio (`#tabla-municipios`), niveles y fuentes; atribución de CAMS en el pie
+- `/comarcas/`: mapa provincial con las 7 comarcas enlazadas, tarjetas "Hoy en cada comarca" y municipios de cada una, con la norma (Orden de 14/03/2003)
+- `/comarcas/[comarca]/`: mapa SVG de máximas de hoy, paneles de hoy y mañana y comparativa municipio a municipio ordenable (conmutador Hoy/Mañana)
+- `/observaciones/`: estaciones de AEMET de la provincia con extremos, mapa SVG, tabla con la antigüedad del dato y serie horaria plegable por estación (`#serie-{idema}`)
 - `/agro/`: ETo y balance de riego, invernadero frente a interior, helada y calor, lluvia y viento acumulados y estado de las estaciones RIA
 - `/404`: buscador y accesos a las secciones
-- Pendientes (los datos y las librerías ya están en `src/lib/{comarcas,observaciones,avisos,playas,mar,calima}.ts`): `/comarcas/[comarca]/`, `/observaciones/`, `/avisos/`, `/playas/` y `/playas/[playa]/`, `/mar/`, `/calima/`
+- Los mapas de avisos, calima, comarcas y observaciones son SVG generados en el build (sin Leaflet) a partir de `public/municipios.geojson` (`src/lib/geozonas.ts`, `src/components/ComarcaGeo.ts`).
+- Los componentes con muchas celdas o trazados (tablas de 103 filas, series, mapas SVG) usan `<style is:global>` con un prefijo propio (`cc-`, `obs-`, `cp-`, `comarca-mapa`…) para no repetir `data-astro-cid` en cada elemento.
 
 ## Hoja de ruta
 
 1. Municipio + portada + despliegue: hecho
-2. Mapa y gráficas: hecho. Comarcas y observaciones: datos y librerías hechos, faltan las páginas
-3. Avisos (CAP XML), playas, mar y calima: descarga y librerías hechas, faltan las páginas
+2. Mapa, gráficas, comarcas y observaciones: hecho
+3. Avisos (CAP XML), playas, mar y calima: hecho
 4. Agro, radar, zonas de predicción, rediseño y cadencias por fuente: hecho
