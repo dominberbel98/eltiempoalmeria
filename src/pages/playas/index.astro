@@ -1,0 +1,357 @@
+---
+// /playas/: predicción de AEMET para hoy y mañana de las 22 playas de Almería, agrupadas por municipio y ordenadas a lo
+// largo de la costa, de Adra a Pulpí. Filtros por comarca y "solo mar en calma" con un script pequeño; sin JavaScript
+// se ven todas las playas y los filtros no aparecen.
+import Base from "../../layouts/Base.astro";
+import IconoCielo from "../../components/IconoCielo";
+import puntosCosta from "../../../scripts/puntos-costa-almeria.json";
+import { comarcaDeMunicipio } from "../../lib/comarcas";
+import {
+  ATRIBUCION_PLAYAS,
+  NOTA_ELABORACION,
+  TEXTO_ESTADO_MAR,
+  URL_PLAYAS_AEMET,
+  categoriaUv,
+  cieloIcono,
+  estadoMar,
+  getPlayas,
+  hoyMadrid,
+  listaPlayas,
+  resumenListado,
+  textoFranja,
+  textoOleaje,
+  textoViento,
+  type DiaPlaya,
+  type EstadoMar,
+  type Playa,
+} from "../../lib/playas";
+import { diaConNumero } from "../../lib/tiempo";
+
+const base = import.meta.env.BASE_URL;
+const datos = getPlayas();
+const playas = listaPlayas(datos);
+const fechaHoy = hoyMadrid();
+const fechaManana = new Date(Date.parse(`${fechaHoy}T12:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+const resumenHoy = resumenListado(playas, fechaHoy, fechaHoy);
+
+// --- Orden a lo largo de la costa ---
+// Posición de cada playa sobre la línea que une los 10 puntos de costa (de Adra a San Juan de los Terreros), en km.
+// Ordenar por longitud fallaría en el Levante, donde la costa sube hacia el norte.
+const KM_LAT = 110.57;
+const KM_LON = 111.32 * Math.cos((37 * Math.PI) / 180);
+const xy = (lat: number, lon: number) => [lon * KM_LON, lat * KM_LAT] as const;
+const linea = (puntosCosta as { lat: number; lon: number }[]).map((p) => xy(p.lat, p.lon));
+function posicionCosta(lat: number, lon: number): number {
+  const [px, py] = xy(lat, lon);
+  let mejor = { d: Infinity, pos: 0 };
+  let acumulado = 0;
+  for (let i = 0; i < linea.length - 1; i++) {
+    const [ax, ay] = linea[i];
+    const [bx, by] = linea[i + 1];
+    const largo = Math.hypot(bx - ax, by - ay);
+    let t = largo ? ((px - ax) * (bx - ax) + (py - ay) * (by - ay)) / largo ** 2 : 0;
+    // Antes del primer punto y después del último, la recta sigue
+    t = Math.min(i === linea.length - 2 ? Infinity : 1, Math.max(i === 0 ? -Infinity : 0, t));
+    const d = Math.hypot(px - (ax + t * (bx - ax)), py - (ay + t * (by - ay)));
+    if (d < mejor.d) mejor = { d, pos: acumulado + t * largo };
+    acumulado += largo;
+  }
+  return mejor.pos;
+}
+
+// --- Grupos por municipio ---
+type DiaVista = { etiqueta: string; fecha: string; dia: DiaPlaya | null; estado: EstadoMar };
+type Tarjeta = { playa: Playa; pos: number; hoy: DiaVista; manana: DiaVista };
+const vistaDia = (p: Playa, fecha: string, etiqueta: string): DiaVista => {
+  const dia = p.dias.find((d) => d.fecha === fecha) ?? null;
+  return { etiqueta, fecha, dia, estado: estadoMar(dia) };
+};
+const tarjetas: Tarjeta[] = playas
+  .map((p) => ({ playa: p, pos: posicionCosta(p.lat, p.lon), hoy: vistaDia(p, fechaHoy, "Hoy"), manana: vistaDia(p, fechaManana, "Mañana") }))
+  .sort((a, b) => a.pos - b.pos);
+
+type Grupo = { id: string; nombre: string; slug: string; comarca: { slug: string; nombre: string } | null; tarjetas: Tarjeta[] };
+const grupos: Grupo[] = [];
+for (const t of tarjetas) {
+  const m = t.playa.municipio;
+  let g = grupos.find((x) => x.id === m.id);
+  if (!g) {
+    const c = comarcaDeMunicipio(m.id);
+    g = { id: m.id, nombre: m.nombre, slug: m.slug, comarca: c ? { slug: c.slug, nombre: c.nombre } : null, tarjetas: [] };
+    grupos.push(g);
+  }
+  g.tarjetas.push(t);
+}
+const comarcas = grupos
+  .map((g) => g.comarca)
+  .filter((c, i, xs): c is NonNullable<typeof c> => !!c && xs.findIndex((x) => x?.slug === c.slug) === i);
+
+// --- Textos ---
+const CLASE_ESTADO: Record<EstadoMar, string> = {
+  buena: "bg-mar-fondo text-mar-texto",
+  regular: "bg-niebla text-basalto",
+  mala: "bg-almagra-fondo text-almagra-oscuro",
+  "sin-datos": "border border-linea text-ceniza",
+};
+const conCalmaHoy = tarjetas.filter((t) => t.hoy.estado === "buena").length;
+const conDatosHoy = tarjetas.filter((t) => t.hoy.dia).length;
+// "Mar movida en Retamar, La Romanilla y 4 más." (de oeste a este); con todas en calma, la frase de la librería
+const listaFmt = new Intl.ListFormat("es", { style: "long", type: "conjunction" });
+const nombres = (ts: Tarjeta[]) => {
+  const n = ts.map((t) => t.playa.nombre);
+  return n.length <= 3 ? listaFmt.format(n) : `${n.slice(0, 3).join(", ")} y ${n.length - 3} más`;
+};
+const fuertesHoy = tarjetas.filter((t) => t.hoy.estado === "mala");
+const movidasHoy = tarjetas.filter((t) => t.hoy.estado === "regular");
+const fraseHoy =
+  [fuertesHoy.length ? `mar fuerte en ${nombres(fuertesHoy)}` : null, movidasHoy.length ? `mar movida en ${nombres(movidasHoy)}` : null]
+    .filter((x): x is string => !!x)
+    .join("; ")
+    .replace(/^./, (c) => c.toLocaleUpperCase("es"))
+    .replace(/.$/, (c) => `${c}.`) || resumenHoy.frase;
+const grados = (v: number | null) => (v == null ? "—" : `${v} °C`);
+const textoUv = (uv: number | null) => (uv == null ? "—" : `${uv} (${categoriaUv(uv)})`);
+const rango = (a: number | null, b: number | null) => (a == null || b == null ? "—" : a === b ? `${a} °C` : `de ${a} a ${b} °C`);
+const fechaLarga = (f: string) => diaConNumero(f).toLocaleLowerCase("es");
+
+const titulo = "El tiempo en las playas de Almería: oleaje, viento y temperatura del agua";
+const descripcion = `Predicción de AEMET para hoy y mañana en las ${playas.length} playas de la provincia de Almería, de Adra a Pulpí: estado del cielo, oleaje, viento, temperatura del agua e índice UV.`;
+const jsonLd = {
+  "@context": "https://schema.org",
+  "@type": "WebPage",
+  name: "El tiempo en las playas de Almería",
+  url: new URL(`${base}playas/`, Astro.site).href,
+  inLanguage: "es-ES",
+  description: descripcion,
+  ...(datos.actualizado ? { dateModified: datos.actualizado } : {}),
+  mainEntity: {
+    "@type": "ItemList",
+    numberOfItems: tarjetas.length,
+    itemListElement: tarjetas.map((t, i) => ({
+      "@type": "ListItem",
+      position: i + 1,
+      name: `${t.playa.nombre} (${t.playa.municipio.nombre})`,
+      url: new URL(`${base}playas/${t.playa.slug}/`, Astro.site).href,
+    })),
+  },
+};
+---
+
+<Base title={titulo} description={descripcion} jsonLd={jsonLd}>
+  <nav class="migas" aria-label="Migas de pan">
+    <a href={base}>Provincia de Almería</a> / <span aria-current="page">Playas</span>
+  </nav>
+
+  <section aria-labelledby="t-playas" class="flex flex-wrap items-end gap-x-14 gap-y-8">
+    <div class="flex flex-[1_1_480px] flex-col gap-3.5">
+      <h1 id="t-playas" class="titular text-[clamp(3.5rem,2.4rem+3.6vw,5.5rem)] leading-[0.88]">El tiempo en las playas</h1>
+      <p class="max-w-[52ch] text-lg leading-normal text-gris-texto">
+        Predicción de AEMET para hoy, {fechaLarga(fechaHoy)}, y mañana en las {playas.length} playas de la provincia, de Adra a Pulpí: cielo
+        por la mañana y por la tarde, oleaje, viento, temperatura del agua e índice UV.
+      </p>
+    </div>
+    <div class="sobre-oscuro flex flex-[1_1_360px] flex-col gap-3 rounded-[4px] bg-basalto px-7 py-6">
+      <h2 class="text-suave-oscuro">Hoy en la costa</h2>
+      {
+        conDatosHoy ? (
+          <>
+            <p class="titular text-[clamp(2rem,1.7rem+1.2vw,2.75rem)] leading-[1.02]">
+              {conCalmaHoy === conDatosHoy
+                ? "Mar en calma en todas las playas"
+                : conCalmaHoy
+                  ? `Mar en calma en ${conCalmaHoy} de ${conDatosHoy} playas`
+                  : "Ninguna playa con el mar en calma"}
+            </p>
+            {fraseHoy && <p class="leading-normal text-texto-oscuro">{fraseHoy}</p>}
+            <dl class="datos-clave md:grid-cols-2">
+              <div>
+                <dt>Agua</dt>
+                <dd>{rango(resumenHoy.tAguaMin, resumenHoy.tAguaMax)}</dd>
+              </div>
+              <div>
+                <dt>UV máximo</dt>
+                <dd>{textoUv(resumenHoy.uvMax)}</dd>
+              </div>
+            </dl>
+          </>
+        ) : (
+          <p class="leading-normal text-texto-oscuro">AEMET aún no ha publicado la predicción de hoy para las playas de Almería.</p>
+        )
+      }
+    </div>
+  </section>
+
+  <div class="filtros flex flex-col gap-3" data-filtros-playas>
+    <div class="flex flex-wrap items-center gap-x-6 gap-y-3">
+      <div class="chips chips-claro" role="group" aria-label="Filtrar por comarca">
+        <button type="button" aria-pressed="true" data-comarca="todas">Toda la costa</button>
+        {
+          comarcas.map((c) => (
+            <button type="button" aria-pressed="false" data-comarca={c.slug}>
+              {c.nombre}
+            </button>
+          ))
+        }
+      </div>
+      <button type="button" class="boton-pastilla" aria-pressed="false" data-calma>Solo mar en calma hoy</button>
+    </div>
+    <p class="nota" aria-live="polite" data-recuento>Se ven las {tarjetas.length} playas.</p>
+  </div>
+
+  <p class="aviso aviso-info" data-sin-resultados hidden>
+    Ninguna playa de esta comarca tiene hoy el mar en calma. Quita el filtro para ver todas.
+  </p>
+
+  <div class="flex flex-col gap-10 md:gap-12">
+    {
+      grupos.map((g) => (
+        <section aria-labelledby={`t-${g.slug}`} class="flex flex-col gap-4" data-grupo-comarca={g.comarca?.slug ?? ""}>
+          <div class="separado flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1 pt-4">
+            <h2 id={`t-${g.slug}`} class="titular titular-3">
+              {g.nombre}
+            </h2>
+            <a class="inline-flex min-h-11 items-center" href={`${base}${g.slug}/`}>
+              Previsión por horas de {g.nombre}
+            </a>
+          </div>
+          <ul class="m-0 grid list-none grid-cols-1 gap-4 p-0 lg:grid-cols-2" role="list">
+            {g.tarjetas.map((t) => (
+              <li class="panel flex flex-col gap-4 p-4 md:p-5" data-playa data-calma-hoy={String(t.hoy.estado === "buena")}>
+                <h3 class="titular titular-4">
+                  <a href={`${base}playas/${t.playa.slug}/`}>{t.playa.nombre}</a>
+                </h3>
+                <div class="grid grid-cols-2 gap-x-4 gap-y-4 sm:gap-x-6">
+                  {[t.hoy, t.manana].map((d) => (
+                    <div class="flex min-w-0 flex-col gap-2.5">
+                      <h4 class="font-bold">
+                        {d.etiqueta}
+                        <span class="sr-only">, {fechaLarga(d.fecha)}</span>
+                      </h4>
+                      <span class={`self-start rounded-[3px] px-2 py-0.5 text-[14px] font-semibold ${CLASE_ESTADO[d.estado]}`}>
+                        {TEXTO_ESTADO_MAR[d.estado]}
+                      </span>
+                      {d.dia ? (
+                        <>
+                          <p class="flex items-start gap-2 leading-snug">
+                            {cieloIcono(d.dia.cielo.tarde.codigo ?? d.dia.cielo.manana.codigo) && (
+                              <IconoCielo cielo={cieloIcono(d.dia.cielo.tarde.codigo ?? d.dia.cielo.manana.codigo)!} size={24} />
+                            )}
+                            <span>{d.dia.cielo.texto ?? "—"}</span>
+                          </p>
+                          <dl class="m-0 flex flex-col gap-1 text-[15px] leading-snug">
+                            <div>
+                              <dt class="inline text-ceniza">Oleaje: </dt>
+                              <dd class="inline">{(d.dia.oleaje.texto ?? textoFranja(d.dia.oleaje.manana, textoOleaje)).toLocaleLowerCase("es")}</dd>
+                            </div>
+                            <div>
+                              <dt class="inline text-ceniza">Viento: </dt>
+                              <dd class="inline">{(d.dia.viento.texto ?? textoFranja(d.dia.viento.manana, textoViento)).toLocaleLowerCase("es")}</dd>
+                            </div>
+                            <div>
+                              <dt class="inline text-ceniza">Agua: </dt>
+                              <dd class="inline font-semibold">{grados(d.dia.tAgua)}</dd>
+                            </div>
+                            <div>
+                              <dt class="inline text-ceniza">Máxima: </dt>
+                              <dd class="inline font-semibold">{grados(d.dia.tMax)}</dd>
+                            </div>
+                            <div>
+                              <dt class="inline text-ceniza">UV: </dt>
+                              <dd class="inline font-semibold">{textoUv(d.dia.uvMax)}</dd>
+                            </div>
+                          </dl>
+                        </>
+                      ) : (
+                        <p class="nota">AEMET no tiene predicción de este día para la playa.</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ))
+    }
+  </div>
+
+  <section aria-labelledby="t-fuente" class="separado flex flex-wrap gap-x-12 gap-y-3 pt-6">
+    <h2 id="t-fuente" class="flex-[0_0_200px] text-lg font-bold">De dónde salen los datos</h2>
+    <div class="texto-largo flex flex-[1_1_420px] flex-col gap-2">
+      <p>
+        {ATRIBUCION_PLAYAS}
+        {resumenHoy.elaborado && ` Edición más reciente: ${resumenHoy.elaborado}.`}
+        {" "}{NOTA_ELABORACION}
+      </p>
+      <p>
+        El oleaje y el viento son los de AEMET: oleaje débil, moderado o fuerte y viento flojo, moderado o fuerte. «Mar en calma» quiere decir
+        oleaje débil y viento flojo todo el día; «mar fuerte», oleaje o viento fuerte en algún momento del día. En la ficha de cada playa está
+        además la altura de la ola del modelo Open-Meteo.
+      </p>
+      <p>
+        <a href={URL_PLAYAS_AEMET}>Predicción de playas en aemet.es</a>
+      </p>
+    </div>
+  </section>
+
+  <p slot="pie">{ATRIBUCION_PLAYAS}</p>
+</Base>
+
+<style>
+  /* Los filtros solo funcionan con JavaScript: sin él no se muestran */
+  :global(html:not(.js)) .filtros {
+    display: none;
+  }
+</style>
+
+<script>
+  // Filtros de /playas/: una comarca (o toda la costa) y "solo mar en calma hoy". Ocultan tarjetas y municipios vacíos.
+  const raiz = document.querySelector<HTMLElement>("[data-filtros-playas]");
+  if (raiz) {
+    const botonesComarca = Array.from(raiz.querySelectorAll<HTMLButtonElement>("[data-comarca]"));
+    const botonCalma = raiz.querySelector<HTMLButtonElement>("[data-calma]");
+    const recuento = raiz.querySelector<HTMLElement>("[data-recuento]");
+    const sinResultados = document.querySelector<HTMLElement>("[data-sin-resultados]");
+    const grupos = Array.from(document.querySelectorAll<HTMLElement>("[data-grupo-comarca]"));
+    const total = document.querySelectorAll("[data-playa]").length;
+    let comarca = "todas";
+    let calma = false;
+
+    const aplicar = () => {
+      let visibles = 0;
+      for (const g of grupos) {
+        const enComarca = comarca === "todas" || g.dataset.grupoComarca === comarca;
+        let enGrupo = 0;
+        for (const t of Array.from(g.querySelectorAll<HTMLElement>("[data-playa]"))) {
+          const ver = enComarca && (!calma || t.dataset.calmaHoy === "true");
+          t.hidden = !ver;
+          if (ver) enGrupo++;
+        }
+        g.hidden = enGrupo === 0;
+        visibles += enGrupo;
+      }
+      for (const b of botonesComarca) b.setAttribute("aria-pressed", String(b.dataset.comarca === comarca));
+      botonCalma?.setAttribute("aria-pressed", String(calma));
+      if (recuento) {
+        recuento.textContent =
+          visibles === total
+            ? `Se ven las ${total} playas.`
+            : visibles === 0
+              ? "No se ve ninguna playa."
+              : `Se ve${visibles === 1 ? "" : "n"} ${visibles} de ${total} playas.`;
+      }
+      if (sinResultados) sinResultados.hidden = visibles > 0;
+    };
+
+    for (const b of botonesComarca) {
+      b.addEventListener("click", () => {
+        comarca = b.dataset.comarca ?? "todas";
+        aplicar();
+      });
+    }
+    botonCalma?.addEventListener("click", () => {
+      calma = !calma;
+      aplicar();
+    });
+  }
+</script>
