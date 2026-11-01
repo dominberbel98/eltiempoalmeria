@@ -1,0 +1,62 @@
+{
+  "fuente": {
+    "norma": "Orden de 14 de marzo de 2003, de la Consejería de Turismo y Deporte, por la que se aprueba el mapa de comarcas de Andalucía a efectos de la planificación de la oferta turística y deportiva",
+    "boletin": "BOJA n.º 59, de 27 de marzo de 2003",
+    "url": "https://www.juntadeandalucia.es/boja/2003/59/1",
+    "notas": [
+      "La Orden llama «Almería» a la comarca de la capital; aquí se muestra como «Metropolitana de Almería» para no confundirla con la provincia ni con el municipio.",
+      "Balanegra (04904) no figura en la Orden: se segregó de Berja por el Decreto 144/2015, de 2 de junio (BOJA n.º 118, de 19 de junio de 2015), y se asigna, como Berja, al Poniente Almeriense."
+    ]
+  },
+  "comarcas": [
+    {
+      "slug": "poniente-almeriense",
+      "nombre": "Poniente Almeriense",
+      "nombreOficial": "Poniente Almeriense",
+      "descripcion": "Llanura litoral del Campo de Dalías, entre la sierra de Gádor y el mar, con la mayor concentración de invernaderos de Europa, y las vegas de Adra y Berja.",
+      "municipios": ["04003", "04904", "04029", "04038", "04902", "04041", "04043", "04903", "04079", "04102"]
+    },
+    {
+      "slug": "metropolitana-de-almeria",
+      "nombre": "Metropolitana de Almería",
+      "nombreOficial": "Almería",
+      "descripcion": "La capital y su área: el bajo Andarax, la bahía de Almería y el Campo de Níjar, con la costa volcánica del Cabo de Gata.",
+      "municipios": ["04013", "04024", "04047", "04052", "04066", "04074", "04078", "04081", "04101"]
+    },
+    {
+      "slug": "alpujarra-almeriense",
+      "nombre": "Alpujarra Almeriense",
+      "nombreOficial": "Alpujarra Almeriense",
+      "descripcion": "Valle del Andarax y vertiente almeriense de Sierra Nevada, entre las sierras de Gádor y Nevada: pueblos de montaña, parrales y regadíos en terraza.",
+      "municipios": ["04005", "04007", "04010", "04011", "04012", "04014", "04015", "04020", "04023", "04028", "04030", "04046", "04051", "04054", "04055", "04057", "04067", "04071", "04073", "04077", "04080", "04091"]
+    },
+    {
+      "slug": "filabres-tabernas",
+      "nombre": "Filabres-Tabernas",
+      "nombreOficial": "Filabres-Tabernas",
+      "descripcion": "Sierra de los Filabres, el desierto de Tabernas y el valle del río Nacimiento: el interior más seco de la provincia, con fuertes contrastes de temperatura.",
+      "municipios": ["04001", "04002", "04009", "04026", "04027", "04033", "04045", "04050", "04901", "04060", "04065", "04068", "04082", "04088", "04090", "04094", "04095", "04097"]
+    },
+    {
+      "slug": "levante-almeriense",
+      "nombre": "Levante Almeriense",
+      "nombreOficial": "Levante Almeriense",
+      "descripcion": "Costa oriental de Carboneras a Pulpí y las tierras del bajo Almanzora, Sorbas y Huércal-Overa, abiertas a los vientos de levante.",
+      "municipios": ["04016", "04022", "04032", "04035", "04049", "04053", "04048", "04059", "04064", "04075", "04086", "04093", "04100"]
+    },
+    {
+      "slug": "valle-del-almanzora",
+      "nombre": "Valle del Almanzora",
+      "nombreOficial": "Valle del Almanzora",
+      "descripcion": "Valle del río Almanzora entre las sierras de los Filabres y de las Estancias, con el mármol de Macael y pueblos de interior de clima más continental.",
+      "municipios": ["04004", "04006", "04008", "04017", "04018", "04019", "04021", "04031", "04036", "04034", "04044", "04056", "04058", "04061", "04062", "04069", "04070", "04072", "04076", "04083", "04084", "04085", "04087", "04089", "04092", "04096", "04103"]
+    },
+    {
+      "slug": "los-velez",
+      "nombre": "Los Vélez",
+      "nombreOficial": "Los Vélez",
+      "descripcion": "Altiplano del norte de la provincia, junto a la sierra de María: la comarca más alta y fría, con heladas frecuentes en invierno.",
+      "municipios": ["04037", "04063", "04098", "04099"]
+    }
+  ]
+}

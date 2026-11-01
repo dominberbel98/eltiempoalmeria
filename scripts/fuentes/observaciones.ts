@@ -1,17 +1,41 @@
-// Observación convencional de AEMET (últimas 24 h de todas las estaciones), filtrada a la provincia de Almería.
-// De momento ninguna página la usa (la página /observaciones/ es de una fase posterior): TTL de 3 h para no gastar
-// el cupo de AEMET, que se comparte con la predicción.
+// Observación convencional de AEMET, filtrada a la provincia de Almería, para la página /observaciones/.
+// `/observacion/convencional/todas` solo trae las 12 últimas horas (unas 9.800 lecturas de ~860 estaciones, 2,3 MB),
+// así que cada descarga se fusiona con el archivo anterior (clave estación + `fint`) y se conservan las 24 últimas
+// horas: tras 12 h de ejecuciones la serie está completa. 2 peticiones a AEMET por descarga (endpoint + datos).
+// TTL de 55 min: AEMET publica cada hora y algunas estaciones llegan con una hora de retraso.
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { ClienteAemet, escribirJson, existe, mensajeError, minutosDesde } from "./comun";
+import { ClienteAemet, escribirJson, existe, leerJson, mensajeError, minutosDesde, msIso } from "./comun";
 import type { Fuente } from "./tipos";
 
-const TTL_MIN = 180;
+const TTL_MIN = 55;
+/** Horas de serie que se guardan por estación (lecturas horarias: `fint` desde la más reciente − 23 h). */
+export const HORAS_SERIE = 24;
 // Caja amplia de la provincia: solo sirve para no descartar las estaciones de costa (faros) que el contorno
 // simplificado deja en el mar. Lo que cae dentro de otra provincia se descarta siempre.
 const BBOX = { latMin: 36.65, latMax: 37.95, lonMin: -3.2, lonMax: -1.6 };
 
 type Obs = { idema?: string; lat?: number; lon?: number; fint?: string };
+
+/**
+ * Une las lecturas anteriores con las nuevas (las nuevas mandan si coinciden estación y `fint`), descarta las que no
+ * tienen estación o fecha válida y las de más de HORAS_SERIE horas antes de la lectura más reciente, y ordena por
+ * estación y hora.
+ */
+export function fusionarObservaciones<T extends Obs>(anteriores: T[], nuevas: T[]): T[] {
+  const porClave = new Map<string, T>();
+  for (const o of [...anteriores, ...nuevas]) {
+    const ms = msIso(o.fint);
+    if (!o.idema || !Number.isFinite(ms)) continue;
+    porClave.set(`${o.idema}|${ms}`, o);
+  }
+  const lista = [...porClave.values()];
+  const ultima = Math.max(...lista.map((o) => msIso(o.fint)));
+  const desde = ultima - (HORAS_SERIE - 1) * 3_600_000;
+  return lista
+    .filter((o) => msIso(o.fint) >= desde)
+    .sort((a, b) => a.idema!.localeCompare(b.idema!) || msIso(a.fint) - msIso(b.fint));
+}
 type Anillo = [number, number][];
 type Multi = Anillo[][];
 type Provincias = { almeria: Multi; otras: Multi[] };
@@ -65,14 +89,16 @@ export const actualizar: Fuente = async (ctx) => {
     if (!Array.isArray(todas)) throw new Error("la respuesta no es una lista");
     const enProvincia = todas.filter((o) => enAlmeria(o, provincias));
     if (!enProvincia.length) throw new Error(`ninguna de las ${todas.length} observaciones cae en la provincia`);
-    await escribirJson(ruta, enProvincia);
-    const estaciones = new Set(enProvincia.map((o) => o.idema)).size;
+    const anteriores = await leerJson<Obs[]>(ruta, []);
+    const serie = fusionarObservaciones(Array.isArray(anteriores) ? anteriores : [], enProvincia);
+    await escribirJson(ruta, serie);
+    const estaciones = new Set(serie.map((o) => o.idema)).size;
     return {
       ...base,
       ok: true,
       cambiado: true,
       peticionesAemet: cliente.peticiones,
-      nota: `${enProvincia.length} observaciones de ${estaciones} estaciones`,
+      nota: `${enProvincia.length} lecturas nuevas; ${serie.length} en 24 h de ${estaciones} estaciones`,
       metaFuente: { actualizado: ctx.ahora.toISOString() },
     };
   } catch (e) {
