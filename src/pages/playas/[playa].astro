@@ -1,0 +1,521 @@
+---
+// /playas/[playa]/: ficha de una playa con la predicción de AEMET de hoy y los días siguientes (cielo, oleaje y viento por
+// la mañana y por la tarde, temperatura, sensación, agua y UV), el oleaje del modelo de Open-Meteo en el punto de costa
+// más cercano, la ubicación y las playas cercanas.
+import Base from "../../layouts/Base.astro";
+import IconoCielo from "../../components/IconoCielo";
+import { comarcaDeMunicipio } from "../../lib/comarcas";
+import { getMeta } from "../../lib/datos";
+import {
+  NOTA_MODELO_MAR,
+  colorOla,
+  estadoMar as estadoOla,
+  fmtAgua,
+  fmtAltura,
+  fmtPeriodo,
+  fmtVientoMar,
+  fuenteMar,
+  horaDe,
+  procedencia,
+  puntosMar,
+  rumboCorto,
+  type PuntoMarPagina,
+} from "../../lib/mar";
+import {
+  ATRIBUCION_PLAYAS,
+  NOTA_ELABORACION,
+  TEXTO_ESTADO_MAR,
+  URL_PLAYAS_AEMET,
+  categoriaUv,
+  cieloIcono,
+  consejoUv,
+  diasVigentes,
+  estadoMar,
+  fraseMar,
+  hoyMadrid,
+  listaPlayas,
+  nombreDiaPlaya,
+  playasDeMunicipio,
+  textoCielo,
+  textoElaborado,
+  textoFranja,
+  textoOleaje,
+  textoSensacion,
+  textoViento,
+  type DiaPlaya,
+  type EstadoMar,
+  type Franja,
+  type Playa,
+} from "../../lib/playas";
+import { diaConNumero } from "../../lib/tiempo";
+
+export function getStaticPaths() {
+  return listaPlayas().map((playa) => ({ params: { playa: playa.slug }, props: { playa } }));
+}
+
+const { playa: p } = Astro.props as { playa: Playa };
+const base = import.meta.env.BASE_URL;
+const meta = getMeta();
+const ahora = new Date();
+const hoy = hoyMadrid(ahora);
+const dias = diasVigentes(p, hoy);
+const diaHoy = dias.find((d) => d.fecha === hoy) ?? null;
+const estadoHoy = estadoMar(diaHoy);
+const m = p.municipio;
+const comarca = comarcaDeMunicipio(m.id);
+const elaborado = textoElaborado(p.elaborado);
+
+// --- Distancias ---
+const km = (aLat: number, aLon: number, bLat: number, bLon: number) => {
+  const r = Math.PI / 180;
+  const h = Math.sin(((bLat - aLat) * r) / 2) ** 2 + Math.cos(aLat * r) * Math.cos(bLat * r) * Math.sin(((bLon - aLon) * r) / 2) ** 2;
+  return 2 * 6371 * Math.asin(Math.sqrt(h));
+};
+const textoKm = (d: number) => (d < 1 ? "a menos de 1 km" : `a ${Math.round(d)} km`);
+
+// Punto de costa del modelo de oleaje más cercano (scripts/puntos-costa-almeria.json); solo si está a 30 km o menos
+const DISTANCIA_MAX_PUNTO = 30;
+const puntos = puntosMar(ahora);
+const cercano = puntos
+  .map((pt) => ({ punto: pt, d: km(p.lat, p.lon, pt.lat, pt.lon) }))
+  .filter((x) => x.punto.horas.length > 0)
+  .sort((a, b) => a.d - b.d)[0];
+const punto: PuntoMarPagina | null = cercano && cercano.d <= DISTANCIA_MAX_PUNTO ? cercano.punto : null;
+const fuente = punto ? fuenteMar(ahora) : null;
+const olaAhora = punto?.ahora ?? null;
+const colorAhora = colorOla(olaAhora?.ola);
+
+// Otras playas: las del mismo municipio y las más cercanas de fuera
+const delMunicipio = playasDeMunicipio(m.id).filter((x) => x.id !== p.id);
+const cercanas = listaPlayas()
+  .filter((x) => x.municipio.id !== m.id)
+  .map((x) => ({ playa: x, d: km(p.lat, p.lon, x.lat, x.lon) }))
+  .sort((a, b) => a.d - b.d)
+  .slice(0, 4);
+
+// --- Textos ---
+const CLASE_ESTADO: Record<EstadoMar, string> = {
+  buena: "bg-mar-fondo text-mar-texto",
+  regular: "bg-niebla text-basalto",
+  mala: "bg-almagra-fondo text-almagra-oscuro",
+  "sin-datos": "border border-linea text-ceniza",
+};
+const grados = (v: number | null) => (v == null ? "—" : `${v} °C`);
+const textoUv = (uv: number | null) => (uv == null ? "—" : `${uv} (${categoriaUv(uv)})`);
+const franja = (f: Franja, mapa: (c: number | null) => string | null) => {
+  const t = textoFranja(f, mapa);
+  return t === "—" ? t : t.charAt(0).toLocaleUpperCase("es") + t.slice(1);
+};
+const fechaDia = (f: string) => diaConNumero(f).toLocaleLowerCase("es");
+const tituloDia = (d: DiaPlaya) => {
+  const n = nombreDiaPlaya(d.fecha, hoy);
+  return n === "Hoy" || n === "Mañana" ? { titulo: n, fecha: fechaDia(d.fecha) } : { titulo: n, fecha: null };
+};
+const coord = (v: number, pos: string, neg: string) =>
+  `${Math.abs(v).toLocaleString("es-ES", { minimumFractionDigits: 4, maximumFractionDigits: 4 })}° ${v >= 0 ? pos : neg}`;
+const coordenadas = `${coord(p.lat, "N", "S")}, ${coord(p.lon, "E", "O")}`;
+const urlOsm = `https://www.openstreetmap.org/?mlat=${p.lat}&mlon=${p.lon}#map=15/${p.lat}/${p.lon}`;
+const urlGoogle = `https://www.google.com/maps/search/?api=1&query=${p.lat},${p.lon}`;
+const aLas = (t: string) => (t.startsWith("01:") ? `a la ${t}` : `a las ${t}`);
+
+// --- SEO ---
+const titulo = p.nombre === m.nombre ? `El tiempo en la playa de ${p.nombre} (Almería)` : `El tiempo en la playa ${p.nombre} (${m.nombre})`;
+const resumenTexto = diaHoy
+  ? ` Hoy: ${(diaHoy.cielo.texto ?? "").toLocaleLowerCase("es")}${fraseMar(diaHoy) ? `, ${fraseMar(diaHoy)!.toLocaleLowerCase("es")}` : ""}${diaHoy.tAgua != null ? ` y el agua a ${diaHoy.tAgua} °C` : ""}.`
+  : "";
+const descripcion = `Predicción de AEMET para la playa ${p.nombre}, en ${m.nombre} (Almería): cielo, oleaje, viento, temperatura del agua e índice UV para hoy y los próximos días.${resumenTexto}`;
+const url = new URL(`${base}playas/${p.slug}/`, Astro.site).href;
+const jsonLd = {
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "WebPage",
+      "@id": url,
+      url,
+      name: titulo,
+      description: descripcion,
+      inLanguage: "es-ES",
+      dateModified: meta.updatedAt || ahora.toISOString(),
+      about: { "@id": `${url}#playa` },
+      breadcrumb: {
+        "@type": "BreadcrumbList",
+        itemListElement: [
+          { "@type": "ListItem", position: 1, name: "Provincia de Almería", item: new URL(base, Astro.site).href },
+          { "@type": "ListItem", position: 2, name: "Playas", item: new URL(`${base}playas/`, Astro.site).href },
+          { "@type": "ListItem", position: 3, name: p.nombre, item: url },
+        ],
+      },
+    },
+    {
+      "@type": "Beach",
+      "@id": `${url}#playa`,
+      name: p.nombre,
+      url,
+      geo: { "@type": "GeoCoordinates", latitude: p.lat, longitude: p.lon },
+      address: { "@type": "PostalAddress", addressLocality: m.nombre, addressRegion: "Almería", addressCountry: "ES" },
+      containedInPlace: { "@type": "City", name: m.nombre, url: new URL(`${base}${m.slug}/`, Astro.site).href },
+      hasMap: urlOsm,
+    },
+  ],
+};
+---
+
+<Base title={titulo} description={descripcion} jsonLd={jsonLd}>
+  <nav class="migas" aria-label="Migas de pan">
+    <a href={base}><span class="migas-largo">Provincia de Almería</span><span class="migas-corto">Provincia</span></a> /{" "}
+    <a href={`${base}playas/`}>Playas</a> / <span aria-current="page">{p.nombre}</span>
+  </nav>
+
+  <section aria-labelledby="t-playa" class="flex flex-wrap items-end gap-x-14 gap-y-8">
+    <div class="flex min-w-0 flex-[1_1_480px] flex-col gap-3.5">
+      <h1 id="t-playa" class="titular text-[clamp(3.5rem,2.4rem+3.6vw,5.5rem)] leading-[0.88] [overflow-wrap:anywhere]">{p.nombre}</h1>
+      <p class="text-lg leading-normal text-gris-texto">
+        Playa de <a href={`${base}${m.slug}/`}>{m.nombre}</a>{comarca ? `, ${comarca.nombre}` : ", Almería"}
+      </p>
+    </div>
+    <div class="sobre-oscuro flex min-w-0 flex-[1_1_360px] flex-col gap-3 rounded-[4px] bg-basalto px-7 py-6">
+      <h2 class="text-suave-oscuro">Hoy, {fechaDia(hoy)}</h2>
+      {
+        diaHoy ? (
+          <>
+            <p class="titular text-[clamp(2.25rem,1.9rem+1.4vw,3rem)] leading-none">{TEXTO_ESTADO_MAR[estadoHoy]}</p>
+            <p class="flex items-start gap-2.5 leading-normal text-texto-oscuro">
+              {cieloIcono(diaHoy.cielo.tarde.codigo ?? diaHoy.cielo.manana.codigo) && (
+                <IconoCielo cielo={cieloIcono(diaHoy.cielo.tarde.codigo ?? diaHoy.cielo.manana.codigo)!} size={26} />
+              )}
+              <span>
+                {diaHoy.cielo.texto ?? "Cielo sin predicción"}
+                {fraseMar(diaHoy) ? `. ${fraseMar(diaHoy)}.` : "."}
+              </span>
+            </p>
+            <dl class="datos-clave md:grid-cols-2">
+              <div>
+                <dt>Agua</dt>
+                <dd>{grados(diaHoy.tAgua)}</dd>
+              </div>
+              <div>
+                <dt>Máxima</dt>
+                <dd>{grados(diaHoy.tMax)}</dd>
+              </div>
+              <div>
+                <dt>UV máximo</dt>
+                <dd>{textoUv(diaHoy.uvMax)}</dd>
+              </div>
+              <div>
+                <dt>Sensación</dt>
+                <dd>{franja(diaHoy.sensacion, textoSensacion)}</dd>
+              </div>
+            </dl>
+            {consejoUv(diaHoy.uvMax) && <p class="text-[15px] text-suave-oscuro">{consejoUv(diaHoy.uvMax)}</p>}
+          </>
+        ) : (
+          <p class="leading-normal text-texto-oscuro">
+            AEMET no tiene ahora predicción para esta playa. Aparecerá aquí en cuanto publique la próxima edición, que suele llegar a media mañana.
+          </p>
+        )
+      }
+    </div>
+  </section>
+
+  <section aria-labelledby="t-dias" class="flex flex-col gap-4">
+    <h2 id="t-dias" class="titular titular-2">Hoy y los próximos días</h2>
+    {
+      dias.length ? (
+        <div class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {dias.map((d) => {
+            const t = tituloDia(d);
+            const estado = estadoMar(d);
+            return (
+              <section aria-labelledby={`t-dia-${d.fecha}`} class="panel flex min-w-0 flex-col gap-4 p-4 md:p-5">
+                <div class="flex flex-wrap items-baseline justify-between gap-2">
+                  <h3 id={`t-dia-${d.fecha}`} class="titular titular-3">
+                    {t.titulo}
+                    {t.fecha && <span class="text-[0.7em] font-bold text-ceniza">, {t.fecha}</span>}
+                  </h3>
+                  <span class={`rounded-[3px] px-2 py-0.5 text-[14px] font-semibold ${CLASE_ESTADO[estado]}`}>{TEXTO_ESTADO_MAR[estado]}</span>
+                </div>
+                <table class="tabla">
+                  <caption class="sr-only">Cielo, viento y oleaje por la mañana y por la tarde</caption>
+                  <thead>
+                    <tr>
+                      <td></td>
+                      <th scope="col">Por la mañana</th>
+                      <th scope="col">Por la tarde</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <th scope="row">Cielo</th>
+                      {[d.cielo.manana, d.cielo.tarde].map((f) => (
+                        <td>
+                          <span class="flex items-center gap-2">
+                            {cieloIcono(f.codigo) && <IconoCielo cielo={cieloIcono(f.codigo)!} size={22} />}
+                            {franja(f, textoCielo)}
+                          </span>
+                        </td>
+                      ))}
+                    </tr>
+                    <tr>
+                      <th scope="row">Oleaje</th>
+                      <td>{franja(d.oleaje.manana, textoOleaje)}</td>
+                      <td>{franja(d.oleaje.tarde, textoOleaje)}</td>
+                    </tr>
+                    <tr>
+                      <th scope="row">Viento</th>
+                      <td>{franja(d.viento.manana, textoViento)}</td>
+                      <td>{franja(d.viento.tarde, textoViento)}</td>
+                    </tr>
+                  </tbody>
+                </table>
+                <dl class="grid grid-cols-2 gap-x-5 gap-y-3">
+                  <div>
+                    <dt class="text-sm text-ceniza">Agua</dt>
+                    <dd class="cifra text-[26px]">{grados(d.tAgua)}</dd>
+                  </div>
+                  <div>
+                    <dt class="text-sm text-ceniza">Máxima</dt>
+                    <dd class="cifra text-[26px]">{grados(d.tMax)}</dd>
+                  </div>
+                  <div>
+                    <dt class="text-sm text-ceniza">UV máximo</dt>
+                    <dd class="cifra text-[26px]">{textoUv(d.uvMax)}</dd>
+                  </div>
+                  <div>
+                    <dt class="text-sm text-ceniza">Sensación</dt>
+                    <dd class="cifra text-[26px]">{franja(d.sensacion, textoSensacion)}</dd>
+                  </div>
+                </dl>
+                {consejoUv(d.uvMax) && <p class="nota">{consejoUv(d.uvMax)}</p>}
+              </section>
+            );
+          })}
+        </div>
+      ) : (
+        <p class="aviso aviso-info">
+          <span>
+            AEMET no tiene ahora predicción para esta playa. Mientras tanto, la previsión por horas de{" "}
+            <a href={`${base}${m.slug}/`}>{m.nombre}</a> da la temperatura, el viento y la lluvia del municipio.
+          </span>
+        </p>
+      )
+    }
+    <p class="nota">
+      {ATRIBUCION_PLAYAS}
+      {elaborado && ` Elaborada el ${elaborado}.`} {NOTA_ELABORACION}
+    </p>
+  </section>
+
+  {
+    punto && (
+      <section aria-labelledby="t-ola" class="flex flex-col gap-4">
+        <div class="flex flex-wrap items-baseline justify-between gap-3">
+          <h2 id="t-ola" class="titular titular-2">Altura de la ola</h2>
+          <p class="max-w-[60ch] text-[15px] text-ceniza">
+            Modelo marino de Open-Meteo frente a {punto.nombre}, {textoKm(cercano!.d)} de la playa.
+          </p>
+        </div>
+        {olaAhora && (
+          <div class="panel flex flex-col gap-3 p-4 md:p-5">
+            <h3 class="flex flex-wrap items-center gap-3 font-bold">
+              Ahora, {aLas(horaDe(olaAhora.t))}
+              {colorAhora && (
+                <span class={`rounded-[3px] px-2 py-0.5 text-[14px] font-semibold ${colorAhora.clase} ${colorAhora.borde ? "border border-ceniza" : ""}`}>
+                  {estadoOla(olaAhora.ola)?.nombre}
+                </span>
+              )}
+            </h3>
+            <dl class="datos-clave">
+              <div>
+                <dt>Ola</dt>
+                <dd>
+                  {fmtAltura(olaAhora.ola)}
+                  {olaAhora.olaDir != null && <span class="text-base font-normal"> {procedencia(olaAhora.olaDir)}</span>}
+                </dd>
+              </div>
+              <div>
+                <dt>Periodo</dt>
+                <dd>{fmtPeriodo(olaAhora.olaPeriodo)}</dd>
+              </div>
+              <div>
+                <dt>Mar de fondo</dt>
+                <dd>
+                  {fmtAltura(olaAhora.fondo)}
+                  {olaAhora.fondo != null && olaAhora.fondoDir != null && <span class="text-base font-normal"> {procedencia(olaAhora.fondoDir)}</span>}
+                </dd>
+              </div>
+              <div>
+                <dt>Viento sobre el mar</dt>
+                <dd>
+                  {fmtVientoMar(olaAhora.viento)}
+                  {olaAhora.viento != null && olaAhora.vientoDir != null && <span class="text-base font-normal"> {procedencia(olaAhora.vientoDir)}</span>}
+                </dd>
+              </div>
+            </dl>
+          </div>
+        )}
+        {punto.dias.length > 0 && (
+          <div class="tabla-desplazable" tabindex="0" role="region" aria-label="Tabla de la ola por días">
+            <table class="tabla min-w-[720px] [&_td]:whitespace-nowrap">
+              <caption class="sr-only">Ola más alta, dirección, periodo, mar de fondo, viento y temperatura del agua por días frente a {punto.nombre}</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Día</th>
+                  <th scope="col" class="num">Ola más alta</th>
+                  <th scope="col">Estado de la mar</th>
+                  <th scope="col">Viene de</th>
+                  <th scope="col" class="num">Periodo máximo</th>
+                  <th scope="col" class="num">Mar de fondo</th>
+                  <th scope="col" class="num">Viento máximo</th>
+                  <th scope="col" class="num">Racha máxima</th>
+                  <th scope="col" class="num">Agua</th>
+                </tr>
+              </thead>
+              <tbody>
+                {punto.dias.map((d) => {
+                  const c = colorOla(d.olaMax);
+                  return (
+                    <tr>
+                      <th scope="row" class="whitespace-nowrap">
+                        {d.etiqueta}
+                        {d.parcial && <span class="block text-[13px] font-normal text-ceniza">{d.horas} h de este día</span>}
+                      </th>
+                      <td class="num font-bold">
+                        {fmtAltura(d.olaMax)}
+                        {d.olaMaxHora && <span class="block text-[13px] font-normal text-ceniza">{aLas(horaDe(d.olaMaxHora))}</span>}
+                      </td>
+                      <td>
+                        {c ? (
+                          <span class={`rounded-[3px] px-2 py-0.5 text-[14px] font-semibold ${c.clase} ${c.borde ? "border border-ceniza" : ""}`}>
+                            {d.estado?.nombre}
+                          </span>
+                        ) : (
+                          "—"
+                        )}
+                      </td>
+                      <td>{rumboCorto(d.olaDir)}</td>
+                      <td class="num">{fmtPeriodo(d.periodoMax)}</td>
+                      <td class="num">{fmtAltura(d.fondoMax)}</td>
+                      <td class="num">
+                        {fmtVientoMar(d.vientoMax)}
+                        {d.vientoMax != null && d.vientoDir != null && <span class="text-ceniza"> {rumboCorto(d.vientoDir)}</span>}
+                      </td>
+                      <td class="num texto-almagra">{fmtVientoMar(d.rachaMax)}</td>
+                      <td class="num">{fmtAgua(d.aguaMedia)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <p class="nota">
+          {NOTA_MODELO_MAR} El oleaje de AEMET de arriba (débil, moderado o fuerte) es su predicción para la playa; la altura de la ola es la del modelo,
+          en metros. «Viene de» es el rumbo del que llega la ola.
+          {fuente && ` Modelo descargado el ${fuente.actualizadoTexto}.`}
+          {fuente?.desfasado && " Estos datos del oleaje no son recientes."}
+        </p>
+      </section>
+    )
+  }
+
+  <section aria-labelledby="t-donde" class="flex flex-wrap gap-6">
+    <div class="flex min-w-0 flex-[1_1_320px] flex-col gap-3">
+      <h2 id="t-donde" class="titular titular-3">Dónde está</h2>
+      <dl class="m-0 flex flex-col gap-2.5">
+        <div class="flex justify-between gap-4 border-b border-linea pb-2.5">
+          <dt class="text-ceniza">Municipio</dt>
+          <dd class="m-0 text-right font-bold"><a href={`${base}${m.slug}/`}>{m.nombre}</a></dd>
+        </div>
+        {
+          comarca && (
+            <div class="flex justify-between gap-4 border-b border-linea pb-2.5">
+              <dt class="text-ceniza">Comarca</dt>
+              <dd class="m-0 text-right font-bold">{comarca.nombre}</dd>
+            </div>
+          )
+        }
+        <div class="flex justify-between gap-4 border-b border-linea pb-2.5">
+          <dt class="text-ceniza">Coordenadas</dt>
+          <dd class="m-0 text-right font-bold">{coordenadas}</dd>
+        </div>
+      </dl>
+      <ul class="m-0 flex list-none flex-wrap gap-2 p-0" role="list">
+        <li><a class="boton-pastilla" href={urlOsm}>Ver en OpenStreetMap</a></li>
+        <li><a class="boton-pastilla" href={urlGoogle}>Abrir en Google Maps</a></li>
+      </ul>
+    </div>
+    <div class="flex min-w-0 flex-[1_1_320px] flex-col gap-4">
+      {
+        delMunicipio.length > 0 && (
+          <nav aria-labelledby="t-mismo" class="flex flex-col gap-2.5">
+            <h2 id="t-mismo" class="titular titular-4">Otras playas de {m.nombre}</h2>
+            <ul class="m-0 flex list-none flex-wrap gap-2 p-0" role="list">
+              {delMunicipio.map((x) => (
+                <li>
+                  <a class="boton-pastilla" href={`${base}playas/${x.slug}/`}>
+                    {x.nombre}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </nav>
+        )
+      }
+      {
+        cercanas.length > 0 && (
+          <nav aria-labelledby="t-cerca" class="flex flex-col gap-2.5">
+            <h2 id="t-cerca" class="titular titular-4">Playas cercanas</h2>
+            <ul class="m-0 flex list-none flex-wrap gap-2 p-0" role="list">
+              {cercanas.map((x) => (
+                <li>
+                  <a class="boton-pastilla" href={`${base}playas/${x.playa.slug}/`}>
+                    <span>
+                      {x.playa.nombre}{" "}
+                      <span class="text-ceniza">
+                        ({x.playa.municipio.nombre}, {textoKm(x.d).replace(/^a /, "")})
+                      </span>
+                    </span>
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </nav>
+        )
+      }
+      <nav aria-label="Más previsión" class="flex flex-wrap gap-2">
+        <a class="boton" href={`${base}playas/`}>Todas las playas</a>
+        <a class="boton" href={`${base}${m.slug}/`}>Previsión por horas de {m.nombre}</a>
+      </nav>
+    </div>
+  </section>
+
+  <section aria-labelledby="t-fuente" class="separado flex flex-wrap gap-x-12 gap-y-3 pt-6">
+    <h2 id="t-fuente" class="flex-[0_0_200px] text-lg font-bold">De dónde salen los datos</h2>
+    <div class="texto-largo flex flex-[1_1_420px] flex-col gap-2">
+      <p>
+        Cielo, oleaje, viento, temperaturas y UV: predicción de playas de AEMET{elaborado ? `, elaborada el ${elaborado}` : ""}. AEMET da el
+        oleaje como débil, moderado o fuerte y el viento como flojo, moderado o fuerte, por la mañana y por la tarde.
+      </p>
+      {punto && <p>Altura, periodo y dirección de la ola, mar de fondo y viento sobre el mar: modelo de <a href="https://open-meteo.com/">Open-Meteo</a>.</p>}
+      <p>
+        <a href={URL_PLAYAS_AEMET}>Predicción de playas en aemet.es</a>
+      </p>
+    </div>
+  </section>
+
+  <p slot="pie">{ATRIBUCION_PLAYAS}</p>
+</Base>
+
+<style>
+  .migas-corto {
+    display: none;
+  }
+  @media (max-width: 47.99rem) {
+    .migas-largo {
+      display: none;
+    }
+    .migas-corto {
+      display: inline;
+    }
+  }
+</style>

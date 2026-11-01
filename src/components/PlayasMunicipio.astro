@@ -1,0 +1,127 @@
+---
+// "Playas de {municipio}": enlaces a las fichas de /playas/[playa]/ con el estado del mar y el agua de hoy (AEMET).
+// No pinta nada si el municipio no tiene playas en la predicción de AEMET.
+import { TEXTO_ESTADO_MAR, hoyMadrid, nombreDiaPlaya, playasDeMunicipio, resumenPlaya, type EstadoMar } from "../lib/playas";
+
+// `id`: código INE del municipio ("04013"); `nombre`: su nombre para el título
+type Props = { id: string; nombre: string };
+const { id, nombre } = Astro.props;
+const base = import.meta.env.BASE_URL;
+const hoy = hoyMadrid();
+// El día de hoy, o el primero que tenga AEMET si aún no ha publicado el de hoy (entonces se dice qué día es)
+const filas = playasDeMunicipio(id).map((p) => resumenPlaya(p, undefined, hoy));
+
+const CLASE_ESTADO: Record<EstadoMar, string> = {
+  buena: "bg-mar-fondo text-mar-texto",
+  regular: "bg-niebla text-basalto",
+  mala: "bg-almagra-fondo text-almagra-oscuro",
+  "sin-datos": "border border-linea text-ceniza",
+};
+const detalle = (r: (typeof filas)[number]) =>
+  [r.mar, r.tAgua != null ? `agua a ${r.tAgua} °C` : null].filter((x): x is string => !!x).join(", ").replace(/^./, (c) => c.toLocaleUpperCase("es"));
+---
+
+{
+  filas.length > 0 && (
+    <section class="playas-municipio" aria-labelledby="titulo-playas">
+      <div class="playas-municipio-cabecera">
+        <h2 id="titulo-playas" class="titular titular-3">
+          Playas de {nombre}
+        </h2>
+        <a class="playas-municipio-todas" href={`${base}playas/`}>
+          Todas las playas de Almería
+        </a>
+      </div>
+      <ul class="playas-municipio-lista" role="list">
+        {filas.map((r) => (
+          <li>
+            <a class="panel playas-municipio-enlace" href={`${base}playas/${r.playa.slug}/`}>
+              <span class="playas-municipio-nombre">{r.playa.nombre}</span>
+              <span class={`playas-municipio-estado ${CLASE_ESTADO[r.estado]}`}>
+                {r.fecha && (r.fecha === hoy ? <span class="sr-only">Hoy, </span> : `${nombreDiaPlaya(r.fecha, hoy)}: `)}
+                {TEXTO_ESTADO_MAR[r.estado]}
+              </span>
+              {detalle(r) && <span class="playas-municipio-detalle">{detalle(r)}</span>}
+            </a>
+          </li>
+        ))}
+      </ul>
+    </section>
+  )
+}
+
+<style>
+  .playas-municipio {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .playas-municipio-cabecera {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 4px 24px;
+  }
+  .playas-municipio-cabecera h2 {
+    margin: 0;
+  }
+  .playas-municipio-todas {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+  .playas-municipio-lista {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
+  @media (min-width: 40rem) {
+    .playas-municipio-lista {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+  @media (min-width: 64rem) {
+    .playas-municipio-lista {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+  }
+  .playas-municipio-enlace {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 10px;
+    min-height: 44px;
+    height: 100%;
+    padding: 14px 16px;
+    text-decoration: none;
+  }
+  .playas-municipio-enlace:hover {
+    border-color: var(--color-basalto);
+    color: inherit;
+  }
+  .playas-municipio-enlace:hover .playas-municipio-nombre {
+    color: var(--color-almagra);
+  }
+  .playas-municipio-nombre {
+    font-weight: 700;
+    font-size: 17px;
+    text-decoration: underline;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 0.18em;
+  }
+  .playas-municipio-estado {
+    padding: 1px 8px;
+    border-radius: 3px;
+    font-size: 14px;
+    font-weight: 600;
+  }
+  .playas-municipio-detalle {
+    flex: 1 0 100%;
+    font-size: 15px;
+    color: var(--color-ceniza);
+  }
+</style>
