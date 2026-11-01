@@ -1,0 +1,122 @@
+---
+// Mapa SVG de las estaciones de AEMET en la provincia, generado en el build, para fondos de basalto: cada estación es
+// un punto con el color y la cifra de su última temperatura (borde discontinuo si el dato está atrasado).
+// Sin interacción: la tabla de estaciones es la alternativa accesible.
+import { COLOR, escalaTemperatura, fmtGrados } from "./mapa/escalas";
+import { cajaProvincia, colocarRotulos, proyectar, provincias, terminos, trazado } from "./ComarcaGeo";
+import { MINUTOS_ATRASO, type Estacion } from "../lib/observaciones";
+
+type Props = { estaciones: Estacion[]; descripcion: string };
+const { estaciones, descripcion } = Astro.props;
+
+const ANCHO = 600;
+const FUENTE = 19; // tamaño del rótulo en unidades del lienzo
+const proy = proyectar(cajaProvincia(), ANCHO, 0.03);
+const { almeria, vecinas } = provincias();
+const lineas = [...terminos().values()].map((mp) => trazado(mp, proy, 2.5));
+const escala = escalaTemperatura(
+  estaciones.map((e) => e.ultima?.temp),
+  { helada: true, calor: true }
+);
+
+// De sur a norte, para que los rótulos de la costa (más densa) se coloquen primero
+const puntos = estaciones
+  .map((e) => ({ e, x: proy.x(e.lon), y: proy.y(e.lat), texto: fmtGrados(e.ultima?.temp ?? null) }))
+  .filter((p) => p.x >= 0 && p.x <= proy.ancho && p.y >= 0 && p.y <= proy.alto)
+  .sort((a, b) => b.y - a.y);
+const rotulos = colocarRotulos(
+  puntos.map((p) => ({ x: p.x, y: p.y, ancho: p.texto.length * FUENTE * 0.52, alto: FUENTE })),
+  proy
+);
+const r1 = (n: number) => Math.round(n * 10) / 10;
+---
+
+<figure class="obs-mapa">
+  <svg viewBox={`0 0 ${proy.ancho} ${proy.alto}`} role="img" aria-label={descripcion} preserveAspectRatio="xMidYMid meet">
+    <g fill="none" stroke={COLOR.lineaOscura} stroke-width="1">
+      {vecinas.map((mp) => <path d={trazado(mp, proy, 2)} />)}
+    </g>
+    <path id="obs-mapa-provincia" d={trazado(almeria, proy, 1.2)} fill={COLOR.basalto2} stroke="none" />
+    <g fill="none" stroke={COLOR.lineaOscura} stroke-width="0.8">
+      {lineas.map((d) => <path d={d} />)}
+    </g>
+    <use href="#obs-mapa-provincia" fill="none" stroke={COLOR.bordeOscuro} stroke-width="1.5" />
+    {
+      puntos.map((p, i) => (
+        <g>
+          <circle
+            cx={r1(p.x)}
+            cy={r1(p.y)}
+            r="7"
+            fill={p.e.ultima?.temp == null ? COLOR.basalto2 : escala.color(p.e.ultima.temp)}
+            stroke={p.e.atrasada ? COLOR.almagraClaro : COLOR.cal}
+            stroke-width="2"
+            stroke-dasharray={p.e.atrasada ? "3 2" : undefined}
+          />
+          <text class="obs-mapa-rotulo" x={r1(rotulos[i].x)} y={r1(rotulos[i].y)} text-anchor={rotulos[i].ancla}>
+            {p.texto}
+          </text>
+        </g>
+      ))
+    }
+  </svg>
+  <figcaption class="obs-mapa-pie">
+    <span>Última temperatura de cada estación. Con borde discontinuo, las que llevan más de {MINUTOS_ATRASO / 60} horas sin enviar datos.</span>
+    <span class="leyenda" aria-hidden="true">
+      {
+        [...escala.muestras, ...escala.especiales].map((m) => (
+          <span>
+            <span class="muestra" style={`background:${m.color}`} />
+            <span>{m.etiqueta}</span>
+          </span>
+        ))
+      }
+    </span>
+  </figcaption>
+</figure>
+
+<style is:global>
+  /* Global con prefijo propio: evita un atributo data-astro-cid en cada celda o trazado */
+  .obs-mapa {
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .obs-mapa svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 640px;
+  }
+  .obs-mapa-rotulo {
+    fill: var(--color-cal);
+    font-size: 19px;
+    font-weight: 700;
+    font-stretch: 62%;
+    paint-order: stroke;
+    stroke: var(--color-basalto);
+    stroke-width: 5px;
+    stroke-linejoin: round;
+  }
+  .obs-mapa-pie {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 8px 16px;
+    font-size: 14px;
+    color: var(--color-suave-oscuro);
+  }
+  .obs-mapa-pie > span:first-child {
+    max-width: 44ch;
+  }
+  .obs-mapa-pie .leyenda > span {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .obs-mapa-pie .leyenda .muestra {
+    width: 34px;
+  }
+</style>

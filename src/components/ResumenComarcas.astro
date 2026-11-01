@@ -1,0 +1,219 @@
+---
+// Bloque "Por comarcas" (portada y /comarcas/): una tarjeta por comarca con el tiempo de hoy en sus municipios
+// (cielo más frecuente, horquilla de máximas y mínimas, lluvia, rachas y tormenta) y enlace a su página.
+import IconoCielo from "./IconoCielo";
+import { UMBRAL_TORMENTA, resumenComarcas, type ComparativaComarca, type Extremo } from "../lib/comarcas";
+import { diaConNumero, fmt } from "../lib/tiempo";
+
+type Props = {
+  base: string;
+  // Las 7 comarcas con su comparativa (por defecto, resumenComarcas())
+  comparativas?: ComparativaComarca[];
+  titulo?: string;
+  // Enlace a /comarcas/ al final del bloque (portada)
+  enlaceTodas?: boolean;
+  idTitulo?: string;
+};
+const { base, comparativas = resumenComarcas(), titulo = "Por comarcas", enlaceTodas = false, idTitulo = "titulo-comarcas" } = Astro.props;
+
+const hoy = comparativas[0]?.hoy;
+const horquilla = (a: Extremo | null, b: Extremo | null) => {
+  if (!a || !b) return "—";
+  const x = Math.round(a.valor);
+  const y = Math.round(b.valor);
+  return x === y ? `${fmt(y)}°` : `${fmt(x)} a ${fmt(y)}°`;
+};
+const tarjetas = comparativas.map((c) => {
+  const r = c.resumenHoy;
+  return {
+    c,
+    r,
+    lluvia: !r ? null : r.conLluvia === 0 ? "Sin lluvia prevista" : `Lluvia en ${r.conLluvia === r.municipios ? "todos los municipios" : `${r.conLluvia} de ${r.municipios} municipios`}`,
+    tormenta: r && r.conTormenta > 0 ? `Tormenta posible en ${r.conTormenta === 1 ? "1 municipio" : `${r.conTormenta} municipios`}` : null,
+  };
+});
+---
+
+<section class="rc" aria-labelledby={idTitulo}>
+  <div class="rc-cabecera">
+    <h2 id={idTitulo} class="titular titular-2">{titulo}</h2>
+    {
+      hoy && (
+        <p class="nota">
+          Hoy, {diaConNumero(hoy).toLowerCase()}: de la máxima más baja a la más alta de los municipios de cada comarca, y lo mismo con las
+          mínimas.
+        </p>
+      )
+    }
+  </div>
+  <ul class="rc-lista" role="list">
+    {
+      tarjetas.map(({ c, r, lluvia, tormenta }) => (
+        <li class="panel rc-tarjeta">
+          <h3 class="titular titular-4 rc-nombre">
+            <a href={`${base}comarcas/${c.comarca.slug}/`}>{c.comarca.nombre}</a>
+          </h3>
+          <p class="rc-municipios texto-secundario">{c.filas.length} municipios</p>
+          {r ? (
+            <>
+              {r.cielo && (
+                <p class="rc-cielo">
+                  <IconoCielo cielo={r.cielo} size={26} />
+                  <span>{r.cieloTxt}</span>
+                </p>
+              )}
+              <dl class="rc-datos">
+                <div>
+                  <dt>Máximas</dt>
+                  <dd class="cifra">{horquilla(r.maxMasBaja, r.maxMasAlta)}</dd>
+                </div>
+                <div>
+                  <dt>Mínimas</dt>
+                  <dd class="cifra">{horquilla(r.minMasBaja, r.minMasAlta)}</dd>
+                </div>
+              </dl>
+              <ul class="rc-extra" role="list">
+                <li class="texto-lluvia">
+                  {lluvia}
+                  {r.probMax && r.conLluvia > 0 && `, con una probabilidad de hasta el ${fmt(r.probMax.valor, " %")}`}
+                </li>
+                {r.rachaMax && <li>Rachas de hasta {fmt(r.rachaMax.valor, " km/h")}</li>}
+                {tormenta && (
+                  <li class="rc-tormenta">
+                    {tormenta} (desde el {UMBRAL_TORMENTA} %)
+                  </li>
+                )}
+              </ul>
+            </>
+          ) : (
+            <p class="texto-secundario">Sin previsión para hoy en esta actualización.</p>
+          )}
+        </li>
+      ))
+    }
+  </ul>
+  {
+    enlaceTodas && (
+      <a class="enlace-fuerte rc-todas" href={`${base}comarcas/`}>
+        Comparar los municipios de cada comarca
+      </a>
+    )
+  }
+</section>
+
+<style>
+  .rc-cabecera {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 8px 16px;
+    margin-bottom: 16px;
+  }
+  .rc-cabecera h2,
+  .rc-cabecera p {
+    margin: 0;
+  }
+  .rc-cabecera p {
+    max-width: 60ch;
+  }
+  .rc-lista {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  @media (min-width: 40rem) {
+    .rc-lista {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+  @media (min-width: 64rem) {
+    .rc-lista {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+  }
+  .rc-tarjeta {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 16px 18px 18px;
+  }
+  .rc-tarjeta:hover {
+    border-color: var(--color-basalto);
+  }
+  .rc-nombre {
+    margin: 0;
+  }
+  .rc-nombre a {
+    text-decoration: none;
+  }
+  /* Toda la tarjeta es el objetivo del enlace */
+  .rc-nombre a::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: 4px;
+  }
+  .rc-nombre a:focus-visible {
+    outline: none;
+  }
+  .rc-nombre a:focus-visible::after {
+    outline: 3px solid var(--color-almagra);
+    outline-offset: 2px;
+  }
+  .rc-tarjeta:hover .rc-nombre a {
+    color: var(--color-almagra);
+    text-decoration: underline;
+  }
+  .rc-municipios {
+    margin: -6px 0 0;
+    font-size: 14px;
+  }
+  .rc-cielo {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0;
+    font-size: 15px;
+  }
+  .rc-datos {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    margin: 0;
+    padding-top: 8px;
+    border-top: 1px solid var(--color-linea);
+  }
+  .rc-datos dt {
+    font-size: 13px;
+    color: var(--color-ceniza);
+  }
+  .rc-datos dd {
+    margin: 0;
+    font-size: 24px;
+  }
+  .rc-extra {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    font-size: 14px;
+    line-height: 1.45;
+  }
+  .rc-tormenta {
+    color: var(--color-almagra-oscuro);
+    font-weight: 600;
+  }
+  .rc-todas {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    margin-top: 8px;
+  }
+</style>

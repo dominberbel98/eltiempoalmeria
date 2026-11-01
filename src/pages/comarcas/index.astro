@@ -1,0 +1,211 @@
+---
+// /comarcas/: las 7 comarcas de Almería con su mapa (cada comarca enlaza a su página), el tiempo de hoy en cada una,
+// sus municipios y la norma de la que salen (Orden de 14/03/2003, BOJA n.º 59).
+import Base from "../../layouts/Base.astro";
+import Buscador from "../../components/Buscador";
+import ComarcaMapaProvincia from "../../components/ComarcaMapaProvincia.astro";
+import ResumenComarcas from "../../components/ResumenComarcas.astro";
+import { fuenteComarcas, getComarcas, municipiosDeComarca, resumenComarcas } from "../../lib/comarcas";
+import { getMeta } from "../../lib/datos";
+
+const base = import.meta.env.BASE_URL;
+const meta = getMeta();
+const comarcas = getComarcas();
+const comparativas = resumenComarcas();
+const fuente = fuenteComarcas();
+const total = comarcas.reduce((s, c) => s + c.municipios.length, 0);
+
+const titulo = "El tiempo por comarcas en Almería";
+const descripcion = `Previsión del tiempo en las 7 comarcas de Almería: Poniente, Metropolitana, Alpujarra, Filabres-Tabernas, Levante, Valle del Almanzora y Los Vélez. Máximas, mínimas, lluvia y rachas de hoy y mañana en sus ${total} municipios.`;
+const jsonLd = {
+  "@context": "https://schema.org",
+  "@type": "CollectionPage",
+  name: titulo,
+  description: descripcion,
+  url: new URL(`${base}comarcas/`, Astro.site).href,
+  inLanguage: "es-ES",
+  hasPart: comarcas.map((c) => ({ "@type": "WebPage", name: c.nombre, url: new URL(`${base}comarcas/${c.slug}/`, Astro.site).href })),
+};
+---
+
+<Base title={titulo} description={descripcion} jsonLd={jsonLd} ancho="completo">
+  <div slot="buscador"><Buscador client:idle base={base} version={meta.updatedAt} /></div>
+
+  <section class="banda-oscura" aria-labelledby="t-comarcas">
+    <div class="contenedor comarcas-banda">
+      <div class="comarcas-texto">
+        <h1 id="t-comarcas" class="titular titular-banda">El tiempo por comarcas</h1>
+        <p class="comarcas-intro">
+          La provincia de Almería se reparte en 7 comarcas, de la costa del Poniente al altiplano de Los Vélez. Elige una para comparar el
+          tiempo de hoy y de mañana en todos sus municipios.
+        </p>
+        <ul class="comarcas-enlaces" role="list">
+          {
+            comarcas.map((c) => (
+              <li>
+                <a href={`${base}comarcas/${c.slug}/`}>
+                  <span class="comarcas-enlace-nombre">{c.nombre}</span>
+                  <span class="texto-secundario">{c.municipios.length} municipios</span>
+                </a>
+              </li>
+            ))
+          }
+        </ul>
+      </div>
+      <div class="comarcas-mapa-col">
+        <ComarcaMapaProvincia comarcas={comarcas} base={base} />
+      </div>
+    </div>
+  </section>
+
+  <div class="contenedor pila comarcas-cuerpo">
+    <ResumenComarcas base={base} comparativas={comparativas} titulo="Hoy en cada comarca" idTitulo="t-hoy-comarcas" />
+
+    <section aria-labelledby="t-municipios" class="comarcas-municipios">
+      <h2 id="t-municipios" class="titular titular-2">Municipios de cada comarca</h2>
+      <div class="comarcas-municipios-rejilla">
+        {
+          comarcas.map((c) => (
+            <section aria-labelledby={`t-m-${c.slug}`} class="comarcas-grupo">
+              <h3 id={`t-m-${c.slug}`} class="titular titular-4">
+                <a href={`${base}comarcas/${c.slug}/`}>{c.nombre}</a>
+              </h3>
+              <p class="comarcas-grupo-desc">{c.descripcion}</p>
+              <p class="comarcas-grupo-lista">
+                {municipiosDeComarca(c).map((m, i, lista) => (
+                  <>
+                    <a href={`${base}${m.slug}/`}>{m.nombre}</a>
+                    {i < lista.length - 1 ? ", " : "."}
+                  </>
+                ))}
+              </p>
+            </section>
+          ))
+        }
+      </div>
+    </section>
+
+    <section aria-labelledby="t-fuente" class="comarcas-fuente">
+      <h2 id="t-fuente" class="titular titular-4">De dónde salen las comarcas</h2>
+      <p class="nota">
+        Son las del mapa de comarcas de Andalucía: {fuente.norma} (<a href={fuente.url}>{fuente.boletin}</a>).
+      </p>
+      {fuente.notas.map((t) => <p class="nota">{t}</p>)}
+    </section>
+  </div>
+</Base>
+
+<style>
+  .comarcas-banda {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 24px 56px;
+  }
+  .comarcas-texto {
+    flex: 1 1 360px;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .comarcas-texto h1,
+  .comarcas-intro {
+    margin: 0;
+  }
+  .comarcas-intro {
+    max-width: 48ch;
+    font-size: 18px;
+    line-height: 1.5;
+    color: var(--color-texto-oscuro);
+  }
+  .comarcas-enlaces {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    border-top: 1px solid var(--color-linea-oscura);
+  }
+  .comarcas-enlaces li {
+    border-bottom: 1px solid var(--color-linea-oscura);
+  }
+  .comarcas-enlaces a {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 48px;
+    padding-block: 12px;
+    text-decoration: none;
+  }
+  .comarcas-enlace-nombre {
+    font-size: 18px;
+    font-weight: 700;
+  }
+  .comarcas-enlaces a:hover .comarcas-enlace-nombre {
+    text-decoration: underline;
+  }
+  .comarcas-enlaces .texto-secundario {
+    font-size: 14px;
+  }
+  .comarcas-mapa-col {
+    flex: 1 1 420px;
+    min-width: 0;
+    max-width: 620px;
+  }
+  .comarcas-cuerpo {
+    padding-block: 32px 24px;
+  }
+  @media (min-width: 48rem) {
+    .comarcas-cuerpo {
+      padding-block: 48px 24px;
+    }
+  }
+  .comarcas-municipios h2 {
+    margin: 0 0 16px;
+  }
+  .comarcas-municipios-rejilla {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 24px 40px;
+  }
+  @media (min-width: 48rem) {
+    .comarcas-municipios-rejilla {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+  .comarcas-grupo {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding-top: 12px;
+    border-top: 1px solid var(--color-linea);
+  }
+  .comarcas-grupo h3,
+  .comarcas-grupo p {
+    margin: 0;
+  }
+  .comarcas-grupo h3 a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+  .comarcas-grupo-desc {
+    font-size: 15px;
+    color: var(--color-ceniza);
+  }
+  .comarcas-grupo-lista {
+    line-height: 1.9;
+  }
+  .comarcas-fuente {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .comarcas-fuente h2,
+  .comarcas-fuente p {
+    margin: 0;
+  }
+  .comarcas-fuente p {
+    max-width: 100ch;
+  }
+</style>

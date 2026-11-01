@@ -1,0 +1,142 @@
+---
+// Resumen de un día en una comarca: cielo más frecuente, horquilla de máximas y mínimas, lluvia, rachas y tormenta,
+// con el municipio donde se da cada extremo.
+import IconoCielo from "./IconoCielo";
+import { fmtLluvia } from "./mapa/escalas";
+import { UMBRAL_PROB_LLUVIA, UMBRAL_TORMENTA, type Extremo, type ResumenDia } from "../lib/comarcas";
+import { fmt } from "../lib/tiempo";
+
+type Props = { resumen: ResumenDia | null; titulo: string; base: string; total: number; id: string };
+const { resumen: r, titulo, base, total, id } = Astro.props;
+
+const horquilla = (a: Extremo | null, b: Extremo | null) => {
+  if (!a || !b) return "—";
+  const x = Math.round(a.valor);
+  const y = Math.round(b.valor);
+  return x === y ? `${y}°` : `${fmt(x)} a ${fmt(y)}°`;
+};
+const de = (n: number) => (n === 1 ? "1 municipio" : `${n} municipios`);
+const lluvia = !r
+  ? null
+  : r.conLluvia === 0
+    ? "Sin lluvia prevista en ningún municipio."
+    : `Lluvia prevista en ${r.conLluvia === total ? "todos los municipios" : `${r.conLluvia} de ${de(total)}`}`;
+---
+
+<section class="panel cd" aria-labelledby={id}>
+  <h3 id={id} class="titular titular-3 cd-titulo">{titulo}</h3>
+  {
+    !r ? (
+      <p class="texto-secundario">No hay previsión de este día en esta actualización.</p>
+    ) : (
+      <>
+        {r.cielo && (
+          <p class="cd-cielo">
+            <IconoCielo cielo={r.cielo} size={30} />
+            <span>
+              {r.cieloTxt || "Cielo variable"}
+              <span class="texto-secundario">, lo más frecuente en la comarca</span>
+            </span>
+          </p>
+        )}
+        <dl class="datos-clave cd-datos">
+          <div>
+            <dt>Máximas</dt>
+            <dd>{horquilla(r.maxMasBaja, r.maxMasAlta)}</dd>
+          </div>
+          <div>
+            <dt>Mínimas</dt>
+            <dd>{horquilla(r.minMasBaja, r.minMasAlta)}</dd>
+          </div>
+          <div>
+            <dt>Lluvia</dt>
+            <dd class="texto-lluvia">{r.probMax ? `hasta ${fmt(r.probMax.valor, " %")}` : "—"}</dd>
+          </div>
+          <div>
+            <dt>Rachas</dt>
+            <dd class="texto-almagra">{r.rachaMax ? `hasta ${fmt(r.rachaMax.valor, " km/h")}` : "—"}</dd>
+          </div>
+        </dl>
+        <ul class="cd-frases">
+          {r.maxMasAlta && (
+            <li>
+              Más calor en <a href={`${base}${r.maxMasAlta.municipio.slug}/`}>{r.maxMasAlta.municipio.nombre}</a>, con {fmt(r.maxMasAlta.valor, "°")}{" "}
+              de máxima.
+            </li>
+          )}
+          {r.minMasBaja && (
+            <li>
+              Más frío en <a href={`${base}${r.minMasBaja.municipio.slug}/`}>{r.minMasBaja.municipio.nombre}</a>, con {fmt(r.minMasBaja.valor, "°")}{" "}
+              de mínima.
+            </li>
+          )}
+          <li>
+            {lluvia}
+            {r.conLluvia > 0 && r.probMax && r.probMax.valor >= UMBRAL_PROB_LLUVIA && (
+              <>
+                , con el {fmt(r.probMax.valor, " %")} de probabilidad en <a href={`${base}${r.probMax.municipio.slug}/`}>{r.probMax.municipio.nombre}</a>
+              </>
+            )}
+            {r.conLluvia > 0 && r.precipMax && r.precipMax.valor >= 0.1 && (
+              <>
+                {" "}
+                y hasta {fmtLluvia(r.precipMax.valor)} en <a href={`${base}${r.precipMax.municipio.slug}/`}>{r.precipMax.municipio.nombre}</a>
+              </>
+            )}
+            {r.conLluvia > 0 && "."}
+          </li>
+          {r.conTormenta > 0 && r.tormentaMax && (
+            <li>
+              Tormenta posible en {de(r.conTormenta)} (probabilidad de AEMET de al menos el {UMBRAL_TORMENTA} %), con el{" "}
+              {fmt(r.tormentaMax.valor, " %")} en <a href={`${base}${r.tormentaMax.municipio.slug}/`}>{r.tormentaMax.municipio.nombre}</a>.
+            </li>
+          )}
+          {r.rachaMax && (
+            <li>
+              Las rachas más fuertes, de {fmt(r.rachaMax.valor, " km/h")}, en{" "}
+              <a href={`${base}${r.rachaMax.municipio.slug}/`}>{r.rachaMax.municipio.nombre}</a>.
+            </li>
+          )}
+        </ul>
+      </>
+    )
+  }
+</section>
+
+<style>
+  .cd {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 20px;
+  }
+  .cd-titulo {
+    margin: 0;
+  }
+  .cd-cielo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0;
+    font-size: 17px;
+  }
+  .cd-datos {
+    margin: 0;
+  }
+  .cd-frases {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    font-size: 16px;
+    line-height: 1.5;
+    color: var(--color-gris-texto);
+  }
+  @media (min-width: 48rem) {
+    .cd {
+      padding: 24px 28px;
+    }
+  }
+</style>

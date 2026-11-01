@@ -5,6 +5,7 @@ import Base from "../layouts/Base.astro";
 import Buscador from "../components/Buscador";
 import MapaProvincia, { capaPorDefecto, elegirDestacados, redondearCapa } from "../components/MapaProvincia";
 import TusMunicipios from "../components/TusMunicipios";
+import ResumenComarcas from "../components/ResumenComarcas.astro";
 import IconoCielo from "../components/IconoCielo";
 import { getMeta } from "../lib/datos";
 import { fichas, sinAemet } from "../lib/resumen";
@@ -176,6 +177,8 @@ const jsonLd = {
       </div>
       <a class="enlace-fuerte provincia-todos" href={`${base}mapa/#municipios`}>Ver los 103 municipios</a>
     </section>
+
+    <ResumenComarcas base={base} enlaceTodas />
 
     <section aria-labelledby="titulo-tus" class="panel-suave tus">
       <h2 id="titulo-tus" class="titular titular-4 tus-titulo">Tus municipios</h2>
