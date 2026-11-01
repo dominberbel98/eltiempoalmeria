@@ -1,0 +1,24 @@
+---
+// Flecha de dirección para el viento y el oleaje de /mar/. `grados` es de dónde viene (convenio meteorológico) y la
+// flecha señala hacia dónde va, como en la tabla por horas del municipio. Con `simbolo` pinta, una sola vez por
+// página, el <symbol> que reutilizan todas las flechas (así cada flecha ocupa una línea de HTML).
+type Props = { grados?: number | null; tam?: number; simbolo?: boolean };
+const { grados = null, tam = 14, simbolo = false } = Astro.props;
+const valido = grados != null && Number.isFinite(grados);
+---
+
+{
+  simbolo ? (
+    <svg width="0" height="0" class="absolute" aria-hidden="true" focusable="false">
+      <symbol id="mar-flecha" viewBox="-12 -12 24 24">
+        <path d="M0 -10V10M-5 4L0 10L5 4" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+      </symbol>
+    </svg>
+  ) : (
+    valido && (
+      <svg class="inline-block shrink-0" width={tam} height={tam} viewBox="0 0 24 24" aria-hidden="true" focusable="false" style={`transform:rotate(${Math.round(grados as number)}deg)`}>
+        <use href="#mar-flecha" width="24" height="24" />
+      </svg>
+    )
+  )
+}

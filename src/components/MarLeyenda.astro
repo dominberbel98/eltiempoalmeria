@@ -1,0 +1,36 @@
+---
+// Leyenda de la altura de ola de /mar/: los 6 tramos de color de ESCALA_OLA (escala Douglas) con su rango en metros.
+// Los colores claros llevan borde ceniza de 1 px porque no llegan a 3:1 sobre blanco.
+import { ESCALA_OLA } from "../lib/mar";
+
+type Props = { titulo?: string };
+const { titulo = "Altura de la ola" } = Astro.props;
+
+// Límites de la escala Douglas con sus decimales (1,25 m, no 1,3)
+const m = (v: number, unidad = true) => `${v.toLocaleString("es-ES", { maximumFractionDigits: 2 })}${unidad ? " m" : ""}`;
+const tramos = ESCALA_OLA.map((t, i) => {
+  const hasta = ESCALA_OLA[i + 1]?.desde ?? null;
+  const rango = i === 0 ? `hasta ${m(hasta ?? 0)}` : hasta == null ? `más de ${m(t.desde)}` : `de ${m(t.desde, false)} a ${m(hasta)}`;
+  return { ...t, rango };
+});
+---
+
+<div class="flex flex-col gap-2">
+  <p class="text-sm font-semibold text-ceniza">{titulo}</p>
+  <ul class="m-0 flex list-none flex-wrap gap-x-5 gap-y-2 p-0 text-sm">
+    {
+      tramos.map((t) => (
+        <li class="flex items-center gap-2">
+          <span
+            class={`inline-block h-3.5 w-7 rounded-[2px] ${t.borde ? "border border-ceniza" : ""}`}
+            style={`background:${t.fondo}`}
+            aria-hidden="true"
+          />
+          <span>
+            {t.etiqueta} <span class="text-ceniza">({t.rango})</span>
+          </span>
+        </li>
+      ))
+    }
+  </ul>
+</div>

@@ -1,0 +1,173 @@
+---
+// /mar/: predicción costera de AEMET (boletín FQXX47, con el aviso costero destacado) y oleaje, mar de fondo, agua y
+// viento sobre el mar del modelo de Open-Meteo en 10 puntos de la costa de Almería, de oeste a este, para 72 h.
+import Base from "../layouts/Base.astro";
+import MarBoletin from "../components/MarBoletin.astro";
+import MarDetalle from "../components/MarDetalle.astro";
+import MarFlecha from "../components/MarFlecha.astro";
+import MarOlaFranjas from "../components/MarOlaFranjas.astro";
+import MarPuntosTabla from "../components/MarPuntosTabla.astro";
+import {
+  ATRIBUCION_AEMET,
+  ATRIBUCION_OPEN_METEO,
+  GLOSARIO_MAR,
+  NOTA_ESTADO_MAR,
+  NOTA_MODELO_MAR,
+  costeraPagina,
+  fmtAgua,
+  fmtAltura,
+  fuenteMar,
+  getMar,
+  puntosMar,
+  resumenMar,
+} from "../lib/mar";
+
+const base = import.meta.env.BASE_URL;
+const ahora = new Date();
+const mar = getMar();
+const puntos = puntosMar(ahora, mar);
+const resumen = resumenMar(puntos);
+const costera = costeraPagina(ahora, mar);
+const fuente = fuenteMar(ahora, mar);
+const conDatos = puntos.some((p) => p.horas.length > 0);
+const masAlto = resumen.puntoMasOla ? puntos.find((p) => p.id === resumen.puntoMasOla?.id) : undefined;
+
+const entradilla = [resumen.fraseAhora, resumen.fraseAgua].filter(Boolean).join(" ");
+const descripcion =
+  "Predicción costera de AEMET, aviso costero y oleaje por horas en la costa de Almería: altura y periodo de la ola, mar de fondo, temperatura del agua y viento sobre el mar de Adra a San Juan de los Terreros.";
+
+const jsonLd = {
+  "@context": "https://schema.org",
+  "@type": "WebPage",
+  name: "El mar en la costa de Almería: oleaje y predicción costera",
+  url: new URL(`${base}mar/`, Astro.site).href,
+  inLanguage: "es-ES",
+  description: descripcion,
+};
+---
+
+<Base title="El mar en Almería: oleaje, viento y predicción costera" description={descripcion} jsonLd={jsonLd}>
+  <MarFlecha simbolo />
+  <section aria-labelledby="t-mar" class="flex flex-wrap items-end gap-x-14 gap-y-8">
+    <div class="flex flex-[1_1_480px] flex-col gap-3.5">
+      <h1 id="t-mar" class="titular text-[clamp(3.5rem,2.4rem+3.6vw,5.5rem)] leading-[0.88]">El mar en la costa de Almería</h1>
+      <p class="max-w-[52ch] text-lg leading-normal text-gris-texto">
+        {entradilla || "Predicción costera de AEMET y oleaje de Adra a San Juan de los Terreros."}
+      </p>
+    </div>
+    {
+      resumen.olaAhora && resumen.puntoMasOla && (
+        <div class="sobre-oscuro flex flex-[1_1_360px] flex-col gap-1.5 rounded-[4px] bg-basalto px-7 py-6">
+          <p class="text-suave-oscuro">Ola más alta ahora, en {resumen.puntoMasOla.nombre}</p>
+          <p class="titular text-[clamp(4.5rem,3.8rem+2.4vw,6rem)] leading-[0.9]">
+            {fmtAltura(resumen.puntoMasOla.valor, false)}
+            <span class="text-4xl"> m</span>
+          </p>
+          <p class="text-lg font-bold">{resumen.olaAhora.estadoMax.nombre}</p>
+          <dl class="datos-clave mt-2 !grid-cols-2">
+            <div>
+              <dt>Agua</dt>
+              <dd>{resumen.aguaAhora ? (fmtAgua(resumen.aguaAhora.min) === fmtAgua(resumen.aguaAhora.max) ? fmtAgua(resumen.aguaAhora.max) : `${fmtAgua(resumen.aguaAhora.min, false)} a ${fmtAgua(resumen.aguaAhora.max)}`) : "—"}</dd>
+            </div>
+            <div>
+              <dt>Periodo</dt>
+              <dd>{masAlto?.ahora?.olaPeriodo != null ? `${Math.round(masAlto.ahora.olaPeriodo)} s` : "—"}</dd>
+            </div>
+          </dl>
+        </div>
+      )
+    }
+  </section>
+
+  {
+    fuente.desfasado && conDatos && (
+      <p class="aviso">
+        <span>
+          <strong>El oleaje puede no estar al día:</strong> la última descarga del modelo es del {fuente.actualizadoTexto}.
+        </span>
+      </p>
+    )
+  }
+
+  <section aria-labelledby="t-boletin" class="flex flex-col gap-4">
+    <div class="flex flex-wrap items-baseline justify-between gap-3">
+      <h2 id="t-boletin" class="titular titular-2">Predicción costera de AEMET</h2>
+      <p class="max-w-[60ch] text-[15px] text-ceniza">
+        El texto oficial para las aguas costeras, hasta 20 millas de la orilla. El viento va en la escala Beaufort y la mar, en la escala
+        Douglas.
+      </p>
+    </div>
+    <MarBoletin costera={costera} />
+  </section>
+
+  {
+    !conDatos ? (
+      <p class="aviso">
+        <span>
+          Ahora mismo no hay previsión de oleaje. Cuando se pueda descargar, aparecerán aquí la altura de la ola, el mar de fondo y el viento
+          sobre el mar de cada punto de la costa.
+        </span>
+      </p>
+    ) : (
+      <>
+        <section aria-labelledby="t-ahora" class="flex flex-col gap-3.5">
+          <div class="flex flex-wrap items-baseline justify-between gap-3">
+            <h2 id="t-ahora" class="titular titular-2">Ahora en la costa</h2>
+            <p class="max-w-[60ch] text-[15px] text-ceniza">De oeste a este. Elige un punto para ver su previsión hora a hora.</p>
+          </div>
+          <MarPuntosTabla puntos={puntos} />
+          {resumen.frasePico && <p class="texto-largo">{resumen.frasePico}</p>}
+        </section>
+
+        <section aria-labelledby="t-franjas" class="flex flex-col gap-3.5">
+          <h2 id="t-franjas" class="titular titular-2">El oleaje en las próximas 72 horas</h2>
+          <MarOlaFranjas puntos={puntos} idTablas="detalle-puntos" />
+        </section>
+
+        <section aria-labelledby="t-detalle" class="flex flex-col gap-3.5">
+          <div class="flex flex-wrap items-baseline justify-between gap-3">
+            <h2 id="t-detalle" class="titular titular-2">Punto a punto</h2>
+            <p class="max-w-[60ch] text-[15px] text-ceniza">Resumen de cada día y tabla cada 3 horas con la ola, el mar de fondo y el viento.</p>
+          </div>
+          <MarDetalle puntos={puntos} id="detalle-puntos" />
+        </section>
+      </>
+    )
+  }
+
+  <section aria-labelledby="t-glosario" class="flex flex-col gap-4">
+    <h2 id="t-glosario" class="titular titular-2">Cómo leer el mar</h2>
+    <dl class="m-0 grid grid-cols-1 gap-x-12 gap-y-4 md:grid-cols-2">
+      {
+        GLOSARIO_MAR.map((g) => (
+          <div class="flex flex-col gap-1 border-t border-linea pt-3">
+            <dt class="text-lg font-bold">{g.termino}</dt>
+            <dd class="texto-largo m-0">{g.definicion}</dd>
+          </div>
+        ))
+      }
+    </dl>
+    <p class="nota max-w-[100ch]">{NOTA_ESTADO_MAR}</p>
+  </section>
+
+  <section aria-labelledby="t-fuentes-mar" class="flex flex-wrap gap-x-12 gap-y-4 border-t border-linea pt-6 text-[15px] leading-relaxed text-gris-texto">
+    <h2 id="t-fuentes-mar" class="m-0 flex-[0_0_200px] text-lg font-bold text-basalto">De dónde salen los datos</h2>
+    <div class="grid flex-[1_1_360px] grid-cols-[repeat(auto-fit,minmax(min(100%,360px),1fr))] gap-x-12 gap-y-3">
+      <p class="m-0 max-w-[62ch]">
+        Predicción costera y avisos: boletín de AEMET para las zonas costeras de Andalucía oriental y Melilla.{" "}
+        {fuente.fraseCostera}
+      </p>
+      <p class="m-0 max-w-[62ch]">
+        {NOTA_MODELO_MAR} Puntos: {fuente.puntosTexto}. Última descarga: {fuente.actualizadoTexto}.
+      </p>
+      <p class="m-0 max-w-[62ch]">
+        Son estimaciones de modelo, no medidas de una boya. Cerca de la orilla, en calas y puertos, la ola puede ser bastante menor. Para
+        navegar, consulta siempre la predicción oficial.
+      </p>
+    </div>
+  </section>
+
+  <p slot="pie">
+    Predicción costera: {ATRIBUCION_AEMET} (boletín FQXX47). Oleaje, agua y viento sobre el mar: {ATRIBUCION_OPEN_METEO}.
+  </p>
+</Base>

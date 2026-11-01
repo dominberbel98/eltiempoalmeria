@@ -1,0 +1,129 @@
+---
+// Predicción costera de AEMET en /mar/ (boletín FQXX47): aviso costero destacado, texto oficial de cada subzona
+// (Costa Sur y Costa Oriental de Almería, y aguas de Alborán) con la leyenda de las fuerzas Beaufort y los estados
+// de la mar que cita, situación general y tendencia. El texto de AEMET se reproduce tal cual.
+import { ESCALA_OLA, type CosteraPagina } from "../lib/mar";
+
+type Props = { costera: CosteraPagina | null };
+const { costera: c } = Astro.props;
+const URL_AEMET_MARITIMA = "https://www.aemet.es/es/eltiempo/prediccion/maritima";
+const listaFmt = new Intl.ListFormat("es", { style: "long", type: "conjunction" });
+---
+
+{
+  !c ? (
+    <p class="aviso aviso-info">
+      <span>
+        Ahora mismo no hay predicción costera de AEMET. Puedes consultarla en <a href={URL_AEMET_MARITIMA}>aemet.es</a>.
+      </span>
+    </p>
+  ) : (
+    <div class="flex flex-col gap-5">
+      {c.hayAviso ? (
+        <div class="aviso flex-col gap-1.5" role="note" aria-label="Aviso costero de AEMET">
+          <p class="titular titular-4 text-almagra-oscuro">Aviso costero de AEMET</p>
+          <p class="text-base">{c.aviso}</p>
+          <p class="text-sm text-gris-texto">
+            Para las aguas de Andalucía oriental y Melilla. El detalle, en <a href={URL_AEMET_MARITIMA}>aemet.es</a>.
+          </p>
+        </div>
+      ) : (
+        <p class="aviso aviso-info">
+          <span>
+            <strong>Sin avisos costeros.</strong> El boletín de AEMET no tiene avisos para las aguas de Andalucía oriental y Melilla.
+          </span>
+        </p>
+      )}
+
+      {!c.vigente && (
+        <p class="aviso">
+          <span>
+            <strong>Boletín caducado.</strong> AEMET no ha publicado uno más reciente: el texto puede no corresponder ya al estado de la mar.
+          </span>
+        </p>
+      )}
+
+      <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+        {c.subzonas.map((s) => (
+          <section aria-labelledby={`t-sub-${s.id}`} class="panel flex flex-col gap-4 p-5 md:p-6">
+            <div class="flex flex-col gap-1">
+              <h3 id={`t-sub-${s.id}`} class="titular titular-3">
+                {s.nombre}
+              </h3>
+              {s.puntos.length > 0 && <p class="nota">De {listaFmt.format(s.puntos.map((p) => p.nombre))}.</p>}
+            </div>
+            <blockquote class="m-0 border-l-4 border-mar pl-4 text-lg leading-normal">
+              <p>{s.texto}</p>
+            </blockquote>
+            {(s.fuerzas.length > 0 || s.estados.length > 0) && (
+              <dl class="m-0 flex flex-col gap-3 border-t border-linea pt-3.5 text-[15px]">
+                {s.fuerzas.length > 0 && (
+                  <div class="flex flex-col gap-1.5">
+                    <dt class="text-sm font-semibold text-ceniza">Fuerzas del viento que cita</dt>
+                    {s.fuerzas.map((f) => (
+                      <dd class="m-0">
+                        <strong>Fuerza {f.fuerza}</strong>, {f.nombre.toLowerCase()}: {f.kmh}
+                      </dd>
+                    ))}
+                  </div>
+                )}
+                {s.estados.length > 0 && (
+                  <div class="flex flex-col gap-1.5">
+                    <dt class="text-sm font-semibold text-ceniza">Estados de la mar que cita</dt>
+                    {s.estados.map((e) => {
+                      const m = ESCALA_OLA[e.tramo];
+                      return (
+                        <dd class="m-0 flex items-center gap-2">
+                          <span class={`inline-block h-3 w-6 shrink-0 rounded-[2px] ${m.borde ? "border border-ceniza" : ""}`} style={`background:${m.fondo}`} aria-hidden="true" />
+                          <span>
+                            <strong>{e.nombre}</strong>: olas {e.rango}
+                          </span>
+                        </dd>
+                      );
+                    })}
+                  </div>
+                )}
+              </dl>
+            )}
+          </section>
+        ))}
+      </div>
+
+      {c.alboran && (
+        <section aria-labelledby="t-sub-alboran" class="panel-suave flex flex-col gap-2.5">
+          <h3 id="t-sub-alboran" class="titular titular-4">
+            {c.alboran.nombre}
+          </h3>
+          <p class="leading-normal">{c.alboran.texto}</p>
+          <p class="nota">La isla de Alborán pertenece al término municipal de Almería.</p>
+        </section>
+      )}
+
+      {(c.situacion || c.tendencia) && (
+        <div class="grid grid-cols-1 gap-x-12 gap-y-4 md:grid-cols-2">
+          {c.situacion && (
+            <div class="flex flex-col gap-1.5">
+              <h3 class="text-lg font-bold">Situación general</h3>
+              <p class="texto-largo">{c.situacion}</p>
+            </div>
+          )}
+          {c.tendencia && (
+            <div class="flex flex-col gap-1.5">
+              <h3 class="text-lg font-bold">Tendencia</h3>
+              <p class="texto-largo">{c.tendencia}</p>
+              {c.tendenciaTexto && <p class="nota">{c.tendenciaTexto}.</p>}
+            </div>
+          )}
+        </div>
+      )}
+
+      <div class="flex flex-col gap-1">
+        <p class="nota">
+          Boletín {c.id ?? "costero"} de AEMET elaborado el {c.elaboradoTexto}.{c.validezTexto && ` ${c.validezTexto}.`} Información
+          elaborada por la Agencia Estatal de Meteorología.
+        </p>
+        <a href={URL_AEMET_MARITIMA} class="inline-flex min-h-[44px] items-center self-start text-[15px]">Predicción marítima en aemet.es</a>
+      </div>
+    </div>
+  )
+}

@@ -1,0 +1,58 @@
+---
+// Tabla de /calima/: los 103 municipios (orden alfabético) con el nivel de calima y el polvo máximo de cada día. Es la
+// alternativa en tabla del mapa (CalimaMapa). El nivel va en texto además de en color.
+import { fmtPolvo, type MunicipioCalima } from "../lib/calima";
+
+type Props = { municipios: MunicipioCalima[]; dias: { fecha: string; etiqueta: string }[]; id: string };
+const { municipios, dias, id } = Astro.props;
+const base = import.meta.env.BASE_URL;
+const CORTO: Record<string, string> = { sin: "Sin calima", debil: "Débil", moderada: "Moderada", intensa: "Intensa", "muy-intensa": "Muy intensa" };
+const filas = [...municipios].sort((a, b) => a.nombre.localeCompare(b.nombre, "es"));
+---
+
+<div class="tabla-desplazable" tabindex="0" role="region" aria-labelledby={`${id}-titulo`} id={id}>
+  <table class="tabla [&_td]:whitespace-nowrap [&_td]:py-1.5 [&_tbody_th]:py-0" style={`min-width:${220 + dias.length * 150}px`}>
+    <caption id={`${id}-titulo`} class="sr-only">Nivel de calima y polvo máximo previsto por municipio y día</caption>
+    <thead>
+      <tr>
+        <th scope="col">Municipio</th>
+        {dias.map((d) => <th scope="col">{d.etiqueta}</th>)}
+      </tr>
+    </thead>
+    <tbody>
+      {
+        filas.map((m) => (
+          <tr>
+            <th scope="row">
+              {m.slug ? (
+                <a href={`${base}${m.slug}/`} class="inline-flex min-h-[44px] items-center">
+                  {m.nombre}
+                </a>
+              ) : (
+                m.nombre
+              )}
+            </th>
+            {dias.map((d) => {
+              const dia = m.dias.find((x) => x.fecha === d.fecha);
+              const info = dia?.info;
+              return (
+                <td>
+                  {info && dia ? (
+                    <span class="inline-flex items-center gap-2">
+                      <span class={`inline-block min-w-[6.5rem] rounded-[3px] px-2 py-0.5 text-[15px] ${info.clase} ${info.borde ? "border border-ceniza" : ""}`}>
+                        {CORTO[info.nivel] ?? info.nombre}
+                      </span>
+                      <span class="text-ceniza">{fmtPolvo(dia.polvoMax)}</span>
+                    </span>
+                  ) : (
+                    <span class="text-ceniza">Sin dato</span>
+                  )}
+                </td>
+              );
+            })}
+          </tr>
+        ))
+      }
+    </tbody>
+  </table>
+</div>

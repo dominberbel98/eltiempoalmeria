@@ -1,0 +1,147 @@
+---
+// Franjas de oleaje de /mar/: una fila por punto de la costa (de oeste a este) y una columna por hora de las próximas
+// 72 h, coloreada por el estado de la mar (ESCALA_OLA). Es un SVG estático hecho en el build: cada fila agrupa las
+// horas seguidas del mismo color en un solo rectángulo. La parte gráfica va oculta a los lectores de pantalla porque
+// los mismos datos están en la tabla de cada punto (MarDetalle), a la que enlaza el pie.
+import MarLeyenda from "./MarLeyenda.astro";
+import { colorOla, etiquetaDia, type PuntoMarPagina } from "../lib/mar";
+import { diaConNumero } from "../lib/tiempo";
+
+type Props = { puntos: PuntoMarPagina[]; idTablas: string };
+const { puntos, idTablas } = Astro.props;
+
+const ref = puntos.reduce<PuntoMarPagina | null>((a, p) => (!a || p.horas.length > a.horas.length ? p : a), null);
+const horas = ref?.horas.map((h) => h.t) ?? [];
+const n = horas.length;
+const ahoraLocal = horas[0] ?? "";
+// En móvil, el día abreviado ("Mié 4") para que los rótulos no se pisen
+const corta = (fecha: string, ahora: string) => {
+  const e = etiquetaDia(fecha, ahora);
+  return e === "Hoy" || e === "Mañana" ? e : diaConNumero(fecha, true);
+};
+const pct = (i: number) => `${((i / Math.max(1, n)) * 100).toFixed(3)}%`;
+
+type Tramo = { x: number; w: number; fondo: string | null };
+const filas = puntos.map((p) => {
+  const tramos: Tramo[] = [];
+  p.horas.forEach((h, i) => {
+    // Redondeada a 1 decimal, como en las tablas, para que el color case con la cifra
+    const fondo = colorOla(h.ola == null ? null : Math.round(h.ola * 10) / 10)?.fondo ?? null;
+    const ultimo = tramos[tramos.length - 1];
+    if (ultimo && ultimo.fondo === fondo && ultimo.x + ultimo.w === i) ultimo.w++;
+    else tramos.push({ x: i, w: 1, fondo });
+  });
+  return { id: p.id, nombre: p.nombre, tramos };
+});
+
+// Medianoches (separadores) y días: la etiqueta solo si el tramo del día es lo bastante ancho para que no se pise
+const medianoches = horas.flatMap((t, i) => (i > 0 && t.slice(11, 13) === "00" ? [i] : []));
+const inicios = [0, ...medianoches];
+const dias = inicios
+  .map((i, k) => ({ i, ancho: (inicios[k + 1] ?? n) - i, etiqueta: etiquetaDia(horas[i].slice(0, 10), ahoraLocal), corta: corta(horas[i].slice(0, 10), ahoraLocal) }))
+  .filter((d) => d.ancho >= 10);
+const marcas = horas.flatMap((t, i) => {
+  const h = t.slice(11, 13);
+  return h === "06" || h === "12" || h === "18" ? [{ i, h, principal: h === "12" }] : [];
+});
+const sinDato = filas.some((f) => f.tramos.some((t) => t.fondo == null));
+---
+
+{
+  n > 0 && (
+    <figure class="panel m-0 flex flex-col gap-5 p-4 md:p-6">
+      <div class="mof" aria-hidden="true">
+        <div class="mof-fila">
+          <span />
+          <div class="relative h-6 overflow-hidden text-[13px] font-bold">
+            {dias.map((d) => (
+              <span class="absolute top-0 whitespace-nowrap pl-1.5" style={`left:${pct(d.i)}`}>
+                {d.i === 0 ? (
+                  "Ahora"
+                ) : (
+                  <>
+                    <span class="md:hidden">{d.corta}</span>
+                    <span class="hidden md:inline">{d.etiqueta}</span>
+                  </>
+                )}
+              </span>
+            ))}
+          </div>
+        </div>
+        {filas.map((f) => (
+          <div class="mof-fila">
+            <span class="mof-nombre">{f.nombre}</span>
+            <svg class="mof-pista" viewBox={`0 0 ${n} 1`} preserveAspectRatio="none" focusable="false">
+              {f.tramos.map((t) => (
+                <rect x={t.x} y="0" width={t.w} height="1" fill={t.fondo ?? "#ffffff"} />
+              ))}
+              {medianoches.map((i) => (
+                <line x1={i} x2={i} y1="0" y2="1" class="mof-medianoche" vector-effect="non-scaling-stroke" />
+              ))}
+            </svg>
+          </div>
+        ))}
+        <div class="mof-fila">
+          <span />
+          <div class="relative h-5 overflow-hidden text-[13px] text-ceniza">
+            {marcas.map((m) => (
+              <span class={`absolute top-0 -translate-x-1/2 ${m.principal ? "" : "hidden md:inline"}`} style={`left:${pct(m.i)}`}>
+                {m.h} h
+              </span>
+            ))}
+          </div>
+        </div>
+      </div>
+      <figcaption class="flex flex-col gap-3">
+        <MarLeyenda />
+        <p class="nota">
+          Cada fila es un punto de la costa, de oeste (Adra) a este (San Juan de los Terreros), y cada columna una hora de las próximas{" "}
+          {n} horas. Las líneas verticales marcan la medianoche.{sinDato && " En blanco, las horas sin dato del modelo."} Los valores
+          hora a hora están en <a href={`#${idTablas}`}>la tabla de cada punto</a>.
+        </p>
+      </figcaption>
+    </figure>
+  )
+}
+
+<style>
+  .mof {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .mof-fila {
+    display: grid;
+    grid-template-columns: 5.75rem minmax(0, 1fr);
+    align-items: stretch;
+    gap: 10px;
+  }
+  .mof-nombre {
+    display: flex;
+    align-items: center;
+    min-height: 30px;
+    font-size: 13px;
+    line-height: 1.15;
+  }
+  .mof-pista {
+    display: block;
+    width: 100%;
+    height: 100%;
+    min-height: 30px;
+    border: 1px solid var(--color-linea);
+    border-radius: 2px;
+  }
+  .mof-medianoche {
+    stroke: var(--color-basalto);
+    stroke-width: 2;
+  }
+  @media (min-width: 48rem) {
+    .mof-fila {
+      grid-template-columns: 11rem minmax(0, 1fr);
+      gap: 16px;
+    }
+    .mof-nombre {
+      font-size: 15px;
+    }
+  }
+</style>
