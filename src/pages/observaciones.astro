@@ -1,0 +1,337 @@
+---
+// /observaciones/: lo que miden ahora las estaciones de AEMET en la provincia (observación convencional, lecturas
+// horarias acumuladas hasta 24 h por scripts/fuentes/observaciones.ts). Banda de basalto con los extremos y el mapa,
+// tabla de estaciones y serie horaria plegable de cada una. La antigüedad del dato se avisa y se recalcula en el navegador.
+import Base from "../layouts/Base.astro";
+import Buscador from "../components/Buscador";
+import ObservacionesMapa from "../components/ObservacionesMapa.astro";
+import ObservacionesTabla from "../components/ObservacionesTabla.astro";
+import ObservacionesSerie from "../components/ObservacionesSerie.astro";
+import { fmtGrados, fmtKmh, fmtLluvia } from "../components/mapa/escalas";
+import { getMeta } from "../lib/datos";
+import { MINUTOS_ATRASO, getEstaciones, resumenObservaciones, textoAntiguedad, type ExtremoProvincia } from "../lib/observaciones";
+import { rumbo, textoActualizacion } from "../lib/tiempo";
+import { unirNombres } from "../lib/agro";
+
+const base = import.meta.env.BASE_URL;
+const meta = getMeta();
+const ahora = new Date();
+const estaciones = getEstaciones(ahora);
+const r = resumenObservaciones(estaciones, ahora);
+const horas = Math.max(1, r.horasCubiertas);
+const periodo = horas >= 24 ? "24 horas" : `${horas} horas`;
+const atrasado = r.edadMin > MINUTOS_ATRASO;
+const atrasadas = estaciones.filter((e) => e.atrasada);
+const sinViento = estaciones.filter((e) => e.serie.length && e.serie.every((l) => l.viento == null && l.racha == null)).map((e) => e.nombre);
+
+const hora = (v: { hora: string } | null) => {
+  if (!v) return "";
+  const h = v.hora.slice(11, 16);
+  return `${h.startsWith("01:") ? "a la" : "a las"} ${h}`;
+};
+const ultimoDato = r.ultimoDato ? estaciones.flatMap((e) => (e.ultima && e.ultima.fint === r.ultimoDato ? [e.ultima] : []))[0] ?? null : null;
+const horaUltimo = ultimoDato ? hora(ultimoDato) : null;
+const donde = (x: ExtremoProvincia | null) => (x ? `${x.estacion.nombre}, ${hora(x)}` : "Sin datos");
+
+const datos = [
+  { t: "Más calor ahora", v: fmtGrados(r.tempAhoraMax?.valor), d: r.tempAhoraMax ? r.tempAhoraMax.estacion.nombre : "Sin datos", clase: "" },
+  { t: "Más frío ahora", v: fmtGrados(r.tempAhoraMin?.valor), d: r.tempAhoraMin ? r.tempAhoraMin.estacion.nombre : "Sin datos", clase: "" },
+  { t: `Máxima en ${periodo}`, v: fmtGrados(r.tempMax?.valor), d: donde(r.tempMax), clase: "obs-almagra" },
+  { t: `Mínima en ${periodo}`, v: fmtGrados(r.tempMin?.valor), d: donde(r.tempMin), clase: "" },
+  {
+    t: `Racha más fuerte en ${periodo}`,
+    v: r.rachaMax ? `${fmtKmh(r.rachaMax.valor)}${r.rachaMax.dir != null ? ` ${rumbo(r.rachaMax.dir)}` : ""}` : "—",
+    d: donde(r.rachaMax),
+    clase: "obs-almagra",
+  },
+  {
+    t: `Lluvia en ${periodo}`,
+    v: r.precMax ? fmtLluvia(r.precMax.valor) : "0 mm",
+    d: r.precMax ? `${r.precMax.estacion.nombre}, la que más` : "No ha llovido en ninguna estación",
+    clase: "obs-lluvia",
+  },
+];
+
+const descripcionMapa = `Mapa de la provincia de Almería con las ${estaciones.length} estaciones de AEMET y su última temperatura${
+  r.tempAhoraMin && r.tempAhoraMax ? `, de ${fmtGrados(r.tempAhoraMin.valor)} en ${r.tempAhoraMin.estacion.nombre} a ${fmtGrados(r.tempAhoraMax.valor)} en ${r.tempAhoraMax.estacion.nombre}` : ""
+}. Los mismos datos están en la tabla de estaciones.`;
+
+const titulo = "Observaciones en tiempo real en Almería: estaciones de AEMET";
+const descripcion = `Temperatura, humedad, viento, rachas y lluvia que miden ahora las ${estaciones.length} estaciones de AEMET en la provincia de Almería, con la máxima, la mínima y la lluvia de las últimas 24 horas y la serie hora a hora de cada estación.`;
+const jsonLd = {
+  "@context": "https://schema.org",
+  "@type": "WebPage",
+  name: "Observaciones en tiempo real en Almería",
+  description: descripcion,
+  url: new URL(`${base}observaciones/`, Astro.site).href,
+  inLanguage: "es-ES",
+  dateModified: r.ultimoDato ?? meta.updatedAt ?? ahora.toISOString(),
+};
+---
+
+<Base title={titulo} description={descripcion} jsonLd={jsonLd} ancho="completo">
+  <div slot="buscador"><Buscador client:idle base={base} version={meta.updatedAt} /></div>
+
+  <section class="banda-oscura" aria-labelledby="t-obs">
+    <div class="contenedor obs-banda">
+      <div class="obs-texto">
+        <h1 id="t-obs" class="titular titular-banda">Lo que miden ahora las estaciones</h1>
+        <p class="obs-intro">
+          {
+            estaciones.length ? (
+              <>
+                Últimas lecturas de las {estaciones.length} estaciones de AEMET en la provincia de Almería.
+                {horaUltimo && ultimoDato && (
+                  <>
+                    {" "}
+                    El dato más reciente es de las {ultimoDato.hora.slice(11, 16)} (<span data-hace={ultimoDato.fint}>{textoAntiguedad(r.edadMin)}</span>).
+                  </>
+                )}
+              </>
+            ) : (
+              "Ahora mismo no hay lecturas de las estaciones de AEMET en la provincia."
+            )
+          }
+        </p>
+        {
+          estaciones.length > 0 && (
+            <p
+              class="aviso obs-aviso"
+              data-aviso-obs
+              data-ultimo={r.ultimoDato ?? ""}
+              data-limite={MINUTOS_ATRASO}
+              hidden={!atrasado}
+            >
+              <span>
+                AEMET no ha publicado lecturas más recientes: el último dato tiene más de {MINUTOS_ATRASO / 60} horas. Los valores de esta página
+                pueden no reflejar el tiempo de ahora.
+              </span>
+            </p>
+          )
+        }
+        {
+          estaciones.length > 0 && (
+            <dl class="datos-clave obs-datos">
+              {datos.map((x) => (
+                <div>
+                  <dt>{x.t}</dt>
+                  <dd class={x.clase}>{x.v}</dd>
+                  <dd class="obs-donde">{x.d}</dd>
+                </div>
+              ))}
+            </dl>
+          )
+        }
+      </div>
+      {
+        estaciones.length > 0 && (
+          <div class="obs-mapa-col">
+            <ObservacionesMapa estaciones={estaciones} descripcion={descripcionMapa} />
+          </div>
+        )
+      }
+    </div>
+  </section>
+
+  <div class="contenedor pila obs-cuerpo">
+    {
+      estaciones.length > 0 ? (
+        <>
+          <section aria-labelledby="t-estaciones" class="obs-seccion">
+            <div class="obs-cabecera">
+              <h2 id="t-estaciones" class="titular titular-2">Estaciones</h2>
+              <p class="nota">
+                Máximas, mínimas, rachas y lluvia de las últimas {periodo}
+                {horas < 24 && ": la serie se completa a medida que llegan lecturas nuevas"}.
+              </p>
+            </div>
+            <ObservacionesTabla estaciones={estaciones} horas={horas} />
+            <p class="nota obs-nota">
+              {atrasadas.length > 0 &&
+                `Destacadas, las estaciones que llevan más de ${MINUTOS_ATRASO / 60} horas sin enviar datos (${unirNombres(atrasadas.map((e) => e.nombre))}). `}
+              El viento es la media de los 10 minutos anteriores a la lectura; la racha, la más fuerte de cada hora; la lluvia, la suma de las
+              lecturas horarias.
+              {sinViento.length > 0 && ` ${unirNombres(sinViento)} no ${sinViento.length === 1 ? "mide" : "miden"} el viento.`}
+            </p>
+          </section>
+
+          <section aria-labelledby="t-series" class="obs-seccion">
+            <div class="obs-cabecera">
+              <h2 id="t-series" class="titular titular-2">Hora a hora</h2>
+              <p class="nota">Despliega una estación para ver sus lecturas de las últimas {periodo}.</p>
+            </div>
+            <div class="obs-series">
+              {estaciones.map((e) => (
+                <ObservacionesSerie estacion={e} base={base} />
+              ))}
+            </div>
+          </section>
+        </>
+      ) : (
+        <p class="aviso aviso-info">Cuando AEMET publique lecturas de las estaciones de la provincia, aparecerán aquí.</p>
+      )
+    }
+
+    <section aria-labelledby="t-fuente-obs" class="obs-fuente">
+      <h2 id="t-fuente-obs" class="titular titular-4">Fuente de los datos</h2>
+      <p class="nota">
+        Observación convencional de las estaciones automáticas de la Agencia Estatal de Meteorología, © AEMET. Son datos sin validar: AEMET
+        los publica con alrededor de una hora de retraso y esta web los descarga cada hora. Horas en hora peninsular.
+        {r.actualizado && ` Última descarga: ${textoActualizacion(r.actualizado)}.`}
+      </p>
+      <nav class="obs-secciones" aria-label="Secciones">
+        <a class="boton" href={`${base}radar/`}>Radar</a>
+        <a class="boton" href={`${base}agro/`}>Estaciones agroclimáticas</a>
+        <a class="boton" href={`${base}comarcas/`}>El tiempo por comarcas</a>
+      </nav>
+    </section>
+  </div>
+</Base>
+
+<style>
+  .obs-banda {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 32px 56px;
+  }
+  .obs-texto {
+    flex: 1 1 420px;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .obs-texto h1,
+  .obs-intro {
+    margin: 0;
+  }
+  .obs-intro {
+    max-width: 52ch;
+    font-size: 18px;
+    line-height: 1.5;
+    color: var(--color-texto-oscuro);
+  }
+  .obs-aviso {
+    margin: 0;
+  }
+  .obs-datos {
+    margin: 0;
+    row-gap: 18px;
+  }
+  @media (min-width: 48rem) {
+    .obs-datos {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+  }
+  .obs-datos dd {
+    font-size: 30px;
+  }
+  .obs-datos .obs-donde {
+    margin-top: 2px;
+    font-size: 14px;
+    font-weight: 400;
+    font-stretch: 100%;
+    line-height: 1.35;
+    color: var(--color-suave-oscuro);
+  }
+  .obs-almagra {
+    color: var(--color-almagra-claro);
+  }
+  .obs-lluvia {
+    color: var(--color-lluvia-5);
+  }
+  .obs-mapa-col {
+    flex: 1 1 380px;
+    min-width: 0;
+    max-width: 600px;
+  }
+  .obs-cuerpo {
+    padding-block: 32px 24px;
+  }
+  @media (min-width: 48rem) {
+    .obs-cuerpo {
+      padding-block: 48px 24px;
+    }
+  }
+  .obs-seccion {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .obs-cabecera {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px 16px;
+  }
+  .obs-cabecera h2,
+  .obs-cabecera p,
+  .obs-nota {
+    margin: 0;
+  }
+  .obs-nota {
+    max-width: 100ch;
+  }
+  .obs-series {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+    align-items: start;
+  }
+  @media (min-width: 64rem) {
+    .obs-series {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+  .obs-fuente {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .obs-fuente h2,
+  .obs-fuente p {
+    margin: 0;
+  }
+  .obs-fuente p {
+    max-width: 100ch;
+  }
+  .obs-secciones {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+</style>
+
+<script>
+  // Antigüedad del dato recalculada con la hora del navegador, por si la página tarda en regenerarse,
+  // y apertura de la serie de una estación al llegar desde la tabla (#serie-XXXX).
+  const texto = (min: number) => {
+    if (!Number.isFinite(min)) return "sin datos";
+    const m = Math.max(0, Math.round(min));
+    if (m < 60) return `hace ${m} min`;
+    if (m >= 1440) return "hace más de un día";
+    const h = Math.floor(m / 60);
+    return m % 60 ? `hace ${h} h ${m % 60} min` : `hace ${h} h`;
+  };
+  const refrescar = () => {
+    const ahora = Date.now();
+    for (const el of document.querySelectorAll<HTMLElement>("[data-hace]")) el.textContent = texto((ahora - Date.parse(el.dataset.hace ?? "")) / 60000);
+    const aviso = document.querySelector<HTMLElement>("[data-aviso-obs]");
+    if (aviso) {
+      const t = Date.parse(aviso.dataset.ultimo ?? "");
+      if (!(ahora - t <= Number(aviso.dataset.limite) * 60000)) aviso.hidden = false;
+    }
+  };
+  refrescar();
+  setInterval(refrescar, 60000);
+
+  const abrir = () => {
+    const id = decodeURIComponent(location.hash.slice(1));
+    const el = id ? document.getElementById(id) : null;
+    if (el instanceof HTMLDetailsElement) el.open = true;
+  };
+  window.addEventListener("hashchange", abrir);
+  abrir();
+</script>

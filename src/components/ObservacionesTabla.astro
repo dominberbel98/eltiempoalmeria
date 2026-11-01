@@ -1,0 +1,143 @@
+---
+// Tabla de las estaciones de AEMET de la provincia: último dato y su antigüedad, temperatura, máxima y mínima de la
+// serie, humedad, viento, racha más fuerte y lluvia acumulada. Las estaciones atrasadas van destacadas.
+// La antigüedad se vuelve a calcular en el navegador (data-hace), por si la página tarda en regenerarse.
+import { fmtGrados, fmtKmh, fmtLluvia } from "./mapa/escalas";
+import { horaCorta, textoAntiguedad, type Estacion, type ValorHora } from "../lib/observaciones";
+import { rumbo } from "../lib/tiempo";
+
+type Props = { estaciones: Estacion[]; horas: number };
+const { estaciones, horas } = Astro.props;
+
+const aLas = (v: ValorHora | null) => {
+  if (!v) return null;
+  const h = v.hora.slice(11, 16);
+  return `${h.startsWith("01:") ? "a la" : "a las"} ${h}`;
+};
+const metros = (n: number) => `${String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ".")} m`;
+const viento = (e: Estacion) => {
+  const u = e.ultima;
+  if (u?.viento == null) return "—";
+  if (u.viento === 0) return "En calma";
+  return `${fmtKmh(u.viento)}${u.dir != null ? ` ${rumbo(u.dir)}` : ""}`;
+};
+const periodo = horas >= 24 ? "24 h" : `${horas} h`;
+---
+
+<div class="tabla-desplazable" tabindex="0" role="region" aria-label="Tabla de las estaciones">
+  <table class="tabla obs-tabla">
+    <caption class="sr-only">
+      Último dato de cada estación de AEMET en la provincia de Almería y valores de las últimas {periodo}
+    </caption>
+    <thead>
+      <tr>
+        <th scope="col">Estación</th>
+        <th scope="col">Último dato</th>
+        <th scope="col" class="num">Temperatura</th>
+        <th scope="col" class="num">Máxima {periodo}</th>
+        <th scope="col" class="num">Mínima {periodo}</th>
+        <th scope="col" class="num">Humedad</th>
+        <th scope="col" class="num">Viento</th>
+        <th scope="col" class="num">Racha máxima {periodo}</th>
+        <th scope="col" class="num">Lluvia {periodo}</th>
+      </tr>
+    </thead>
+    <tbody>
+      {
+        estaciones.map((e) => (
+          <tr class:list={{ destacada: e.atrasada }}>
+            <th scope="row" class="obs-estacion">
+              <a href={`#serie-${e.idema}`}>{e.nombre}</a>
+              <span class="obs-sub">
+                {e.municipio ? `${e.municipio.nombre}, ${metros(e.alt)}` : metros(e.alt)}
+              </span>
+            </th>
+            <td>
+              <span class="obs-hora">{horaCorta(e.ultima)}</span>
+              {e.ultima && (
+                <span class:list={["obs-sub", { "obs-atrasada": e.atrasada }]}>
+                  <span data-hace={e.ultima.fint}>{textoAntiguedad(e.edadMin)}</span>
+                  {e.atrasada && ", con retraso"}
+                </span>
+              )}
+            </td>
+            <td class="num cifra obs-temp">{fmtGrados(e.ultima?.temp)}</td>
+            <td class="num">
+              <span class="texto-almagra obs-fuerte">{fmtGrados(e.tempMax24?.valor)}</span>
+              {e.tempMax24 && <span class="obs-sub">{aLas(e.tempMax24)}</span>}
+            </td>
+            <td class="num">
+              <span class:list={["obs-fuerte", { "obs-helada": (e.tempMin24?.valor ?? 1) <= 0 }]}>{fmtGrados(e.tempMin24?.valor)}</span>
+              {e.tempMin24 && <span class="obs-sub">{aLas(e.tempMin24)}</span>}
+            </td>
+            <td class="num">{e.ultima?.hum == null ? "—" : `${Math.round(e.ultima.hum)} %`}</td>
+            <td class="num">{viento(e)}</td>
+            <td class="num">
+              <span class="obs-fuerte">
+                {fmtKmh(e.rachaMax24?.valor)}
+                {e.rachaMax24?.dir != null && ` ${rumbo(e.rachaMax24.dir)}`}
+              </span>
+              {e.rachaMax24 && <span class="obs-sub">{aLas(e.rachaMax24)}</span>}
+            </td>
+            <td class="num texto-lluvia">
+              <span class:list={{ "obs-fuerte": (e.prec24 ?? 0) > 0 }}>{fmtLluvia(e.prec24)}</span>
+              {e.prec24 != null && e.horasPrec < e.horas && <span class="obs-sub">en {e.horasPrec} h</span>}
+            </td>
+          </tr>
+        ))
+      }
+    </tbody>
+  </table>
+</div>
+
+<style is:global>
+  /* Global con prefijo propio: evita un atributo data-astro-cid en cada celda o trazado */
+  .obs-tabla {
+    min-width: 980px;
+  }
+  .obs-tabla td {
+    white-space: nowrap;
+    vertical-align: top;
+  }
+  .obs-tabla tbody th {
+    vertical-align: top;
+  }
+  .obs-tabla tbody th,
+  .obs-tabla tbody td {
+    padding-block: 8px;
+  }
+  .obs-estacion > a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    margin-block: -6px -4px;
+  }
+  .obs-sub {
+    display: block;
+    font-size: 13px;
+    font-weight: 400;
+    line-height: 1.4;
+    color: var(--color-ceniza);
+  }
+  .obs-hora {
+    font-weight: 600;
+  }
+  .obs-atrasada {
+    color: var(--color-almagra-oscuro);
+    font-weight: 600;
+  }
+  .obs-temp {
+    font-size: 24px;
+  }
+  .obs-fuerte {
+    font-weight: 700;
+  }
+  .obs-helada {
+    color: var(--color-helada-texto);
+  }
+  @media (max-width: 47.99rem) {
+    .obs-tabla {
+      min-width: 900px;
+    }
+  }
+</style>

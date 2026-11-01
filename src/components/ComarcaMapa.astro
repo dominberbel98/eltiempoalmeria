@@ -1,0 +1,95 @@
+---
+// Mapa SVG de una comarca, generado en el build, para fondos de basalto: los términos de la comarca pintados con la
+// máxima prevista de hoy (escala de temperatura de los mapas) y los vecinos en gris, sin interacción. La alternativa
+// accesible es la tabla de la comparativa, que tiene los mismos datos.
+import { COLOR, escalaTemperatura } from "./mapa/escalas";
+import { cajaDe, dentroDeCaja, proyectar, terminos, trazado, unionTerminos } from "./ComarcaGeo";
+import type { Comarca } from "../lib/comarcas";
+
+type Props = {
+  comarca: Comarca;
+  // Valor de cada municipio de la comarca (código INE -> °C); null sin dato
+  valores: Record<string, number | null>;
+  // Qué representa el color: "Máxima prevista hoy, domingo 1"
+  leyenda: string;
+  // Texto alternativo del mapa
+  descripcion: string;
+};
+const { comarca, valores, leyenda, descripcion } = Astro.props;
+
+const ANCHO = 600;
+const todos = terminos();
+const propios = comarca.municipios.map((id) => ({ id, mp: todos.get(id) })).filter((t) => t.mp != null) as { id: string; mp: NonNullable<ReturnType<typeof todos.get>> }[];
+const proy = proyectar(cajaDe(propios.map((t) => t.mp)), ANCHO, 0.06);
+const ids = new Set(comarca.municipios);
+const vecinos = [...todos.entries()].filter(([id, mp]) => !ids.has(id) && dentroDeCaja(mp, proy.caja));
+const escala = escalaTemperatura(Object.values(valores), { helada: true, calor: true });
+const contorno = trazado(unionTerminos(comarca.municipios), proy, 1);
+const idLeyenda = `leyenda-${comarca.slug}`;
+---
+
+<figure class="comarca-mapa">
+  <svg viewBox={`0 0 ${proy.ancho} ${proy.alto}`} role="img" aria-label={descripcion} aria-describedby={idLeyenda} preserveAspectRatio="xMidYMid meet">
+    <g fill={COLOR.basalto2} stroke={COLOR.lineaOscura} stroke-width="1">
+      {vecinos.map(([, mp]) => <path d={trazado(mp, proy, 1.6)} />)}
+    </g>
+    <g stroke={COLOR.basalto} stroke-width="1" stroke-linejoin="round">
+      {propios.map((t) => <path d={trazado(t.mp, proy, 1.2)} fill={escala.color(valores[t.id])} />)}
+    </g>
+    <path d={contorno} fill="none" stroke={COLOR.cal} stroke-width="2.5" stroke-linejoin="round" />
+  </svg>
+  <figcaption id={idLeyenda} class="comarca-mapa-pie">
+    <span>{leyenda}</span>
+    <span class="leyenda" aria-hidden="true">
+      {
+        escala.muestras.map((m) => (
+          <span>
+            <span class="muestra" style={`background:${m.color}`} />
+            <span>{m.etiqueta}</span>
+          </span>
+        ))
+      }
+      {
+        escala.especiales.map((m) => (
+          <span>
+            <span class="muestra" style={`background:${m.color}`} />
+            <span>{m.etiqueta}</span>
+          </span>
+        ))
+      }
+    </span>
+  </figcaption>
+</figure>
+
+<style is:global>
+  /* Global con prefijo propio: evita un atributo data-astro-cid en cada celda o trazado */
+  .comarca-mapa {
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .comarca-mapa svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 520px;
+  }
+  .comarca-mapa-pie {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 8px 16px;
+    font-size: 14px;
+    color: var(--color-suave-oscuro);
+  }
+  .comarca-mapa-pie .leyenda > span {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .comarca-mapa-pie .leyenda .muestra {
+    width: 34px;
+  }
+</style>

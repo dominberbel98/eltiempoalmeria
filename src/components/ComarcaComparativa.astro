@@ -1,0 +1,347 @@
+---
+// Comparativa de los municipios de una comarca para hoy y mañana: una tabla por día con cielo, mínima y máxima
+// (barra con la escala común de la comarca), probabilidad y cantidad de lluvia, rachas y tormenta.
+// Sin JavaScript se ven las dos tablas por orden alfabético. Con JavaScript, un conmutador elige el día y las
+// cabeceras pasan a ser botones que ordenan las dos tablas por esa columna (aria-sort).
+import IconoCielo from "./IconoCielo";
+import { fmtLluvia } from "./mapa/escalas";
+import { UMBRAL_PROB_LLUVIA, UMBRAL_TORMENTA, type ComparativaComarca, type DiaComparado } from "../lib/comarcas";
+import { diaConNumero, fmt } from "../lib/tiempo";
+
+type Props = { comparativa: ComparativaComarca; base: string };
+const { comparativa: cc, base } = Astro.props;
+
+const LLUVIA_DESTACADA = 70; // %: fila en fondo de mar (como la semana del municipio)
+const RACHA_FUERTE = 40; // km/h: cifra en almagra
+
+// Escala común de la barra mínima–máxima (los dos días)
+const valores = cc.filas.flatMap((f) => [f.hoy, f.manana]).flatMap((d) => (d ? [d.min, d.max] : [])).filter((v): v is number => v != null);
+const bajo = valores.length ? Math.min(...valores) : 0;
+const alto = valores.length ? Math.max(...valores) : 1;
+const rango = Math.max(1, alto - bajo);
+const pct = (v: number) => Math.round(((v - bajo) / rango) * 1000) / 10;
+const barra = (d: DiaComparado | null) =>
+  d?.min != null && d.max != null ? `left:${pct(Math.min(d.min, d.max))}%;right:${Math.round((100 - pct(Math.max(d.min, d.max))) * 10) / 10}%` : null;
+
+const dias = [
+  { id: "hoy", fecha: cc.hoy, titulo: `Hoy, ${diaConNumero(cc.hoy).toLowerCase()}`, resumen: cc.resumenHoy },
+  { id: "manana", fecha: cc.manana, titulo: `Mañana, ${diaConNumero(cc.manana).toLowerCase()}`, resumen: cc.resumenManana },
+] as const;
+
+// Atributos de orden: vacío si falta el dato (va al final)
+const dato = (v: number | null | undefined) => (v == null || !Number.isFinite(v) ? "" : String(v));
+const COLUMNAS = [
+  { clave: "nombre", texto: "Municipio" },
+  { clave: null, texto: "Cielo" },
+  { clave: "min", texto: "Mínima", num: true },
+  { clave: null, texto: "De mínima a máxima", rango: true },
+  { clave: "max", texto: "Máxima", num: true },
+  { clave: "prob", texto: "Prob. lluvia", num: true },
+  { clave: "precip", texto: "Lluvia", num: true },
+  { clave: "racha", texto: "Rachas", num: true },
+  { clave: "tormenta", texto: "Tormenta", num: true },
+] as const;
+const sinAemet = cc.filas.filter((f) => !f.aemet);
+---
+
+<section class="cc" aria-labelledby="t-comparativa" data-cc>
+  <div class="cc-cabecera">
+    <h2 id="t-comparativa" class="titular titular-2">Municipio a municipio</h2>
+    <div class="segmentado cc-conmutador" role="group" aria-label="Día que se compara">
+      {
+        dias.map((d, i) => (
+          <button type="button" aria-pressed={i === 0 ? "true" : "false"} data-cc-dia={d.id}>
+            {i === 0 ? "Hoy" : "Mañana"}
+          </button>
+        ))
+      }
+    </div>
+  </div>
+
+  {
+    dias.map((d) => (
+      <div class="cc-dia" data-cc-panel={d.id}>
+        <h3 class="titular titular-4 cc-dia-titulo">{d.titulo}</h3>
+        {d.resumen ? (
+          <div class="tabla-desplazable" tabindex="0" role="region" aria-label={`Comparativa de ${d.titulo.toLowerCase()}`}>
+            <table class="tabla cc-tabla">
+              <caption class="sr-only">
+                Previsión de {d.titulo.toLowerCase()} en los {cc.filas.length} municipios de la comarca {cc.comarca.nombre}
+              </caption>
+              <thead>
+                <tr>
+                  {COLUMNAS.map((c) =>
+                    "rango" in c ? (
+                      <th scope="col" class="cc-col-rango">
+                        <span class="sr-only">{c.texto}</span>
+                      </th>
+                    ) : (
+                      <th
+                        scope="col"
+                        class:list={{ num: "num" in c && c.num }}
+                        data-orden={c.clave ?? undefined}
+                        aria-sort={c.clave === "nombre" ? "ascending" : undefined}
+                      >
+                        {c.texto}
+                      </th>
+                    )
+                  )}
+                </tr>
+              </thead>
+              <tbody>
+                {cc.filas.map((f) => {
+                  const x = f[d.id];
+                  const r = d.resumen;
+                  const maxAlta = x?.max != null && r?.maxMasAlta && x.max === r.maxMasAlta.valor;
+                  const minBaja = x?.min != null && r?.minMasBaja && x.min === r.minMasBaja.valor;
+                  const b = barra(x);
+                  return (
+                    <tr
+                      class:list={{ "fila-lluviosa": (x?.prob ?? 0) >= LLUVIA_DESTACADA }}
+                      data-nombre={f.municipio.nombre}
+                      data-min={dato(x?.min)}
+                      data-max={dato(x?.max)}
+                      data-prob={dato(x?.prob)}
+                      data-precip={dato(x?.precip)}
+                      data-racha={dato(x?.racha)}
+                      data-tormenta={dato(x?.tormenta)}
+                    >
+                      <th scope="row" class="cc-municipio">
+                        <a href={`${base}${f.municipio.slug}/`}>{f.municipio.nombre}</a>
+                        {!f.aemet && <span class="cc-fuente">con Open-Meteo</span>}
+                      </th>
+                      <td>
+                        {x ? (
+                          <span class="cc-cielo">
+                            <IconoCielo cielo={x.cielo} size={24} />
+                            <span class="cc-cielo-txt">{x.cieloTxt}</span>
+                          </span>
+                        ) : (
+                          "—"
+                        )}
+                      </td>
+                      <td class:list={["num", { "cc-helada": x?.min != null && x.min <= 0, "cc-extremo": minBaja }]}>{fmt(x?.min, "°")}</td>
+                      <td class="cc-col-rango" aria-hidden="true">
+                        <div class="barra-rango">{b && <span style={b} />}</div>
+                      </td>
+                      <td class:list={["num cc-max", { "texto-almagra": maxAlta }]}>{fmt(x?.max, "°")}</td>
+                      <td class:list={["num texto-lluvia", { "cc-fuerte": (x?.prob ?? 0) >= UMBRAL_PROB_LLUVIA }]}>{fmt(x?.prob, " %")}</td>
+                      <td class="num texto-lluvia">{fmtLluvia(x?.precip)}</td>
+                      <td class:list={["num", { "texto-almagra cc-fuerte": (x?.racha ?? 0) >= RACHA_FUERTE }]}>{fmt(x?.racha, " km/h")}</td>
+                      <td class:list={["num", { "texto-almagra cc-fuerte": (x?.tormenta ?? 0) >= UMBRAL_TORMENTA }]}>{fmt(x?.tormenta, " %")}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p class="aviso aviso-info">No hay previsión de {d.titulo.toLowerCase()} para los municipios de esta comarca en esta actualización.</p>
+        )}
+      </div>
+    ))
+  }
+
+  <p class="nota cc-nota">
+    En color, la máxima más alta del día; en negrita, la mínima más baja; en azul, las mínimas de 0° o menos; en negrita, la probabilidad de lluvia desde el {
+      UMBRAL_PROB_LLUVIA
+    } %, las rachas desde {RACHA_FUERTE} km/h y la tormenta desde el {UMBRAL_TORMENTA} %. La lluvia es la cantidad prevista por el modelo
+    Open-Meteo; la tormenta, la probabilidad de AEMET (sin dato cuando falta su predicción).
+    {
+      sinAemet.length > 0 &&
+        ` ${sinAemet.length === 1 ? `${sinAemet[0].municipio.nombre} no tiene` : `${sinAemet.length} municipios no tienen`} predicción de AEMET al día: se muestran los datos del modelo Open-Meteo.`
+    }
+  </p>
+</section>
+
+<style is:global>
+  /* Global con prefijo propio: evita un atributo data-astro-cid en cada celda o trazado */
+  .cc {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .cc-cabecera {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px 24px;
+  }
+  .cc-cabecera h2 {
+    margin: 0;
+  }
+  .cc-dia {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .cc-dia-titulo {
+    margin: 0;
+  }
+  /* Con JavaScript, el conmutador elige el día y el título del día queda solo para lectores de pantalla */
+  html.js .cc-dia-titulo {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  html:not(.js) .cc-conmutador {
+    display: none;
+  }
+  .cc-tabla {
+    min-width: 760px;
+  }
+  .cc-tabla td,
+  .cc-tabla thead th {
+    white-space: nowrap;
+  }
+  .cc-tabla tbody th,
+  .cc-tabla tbody td {
+    padding-block: 6px;
+  }
+  .cc-municipio a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+  .cc-fuente {
+    display: block;
+    margin-top: -8px;
+    padding-bottom: 4px;
+    font-size: 13px;
+    font-weight: 400;
+    color: var(--color-ceniza);
+  }
+  .cc-cielo {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .cc-col-rango {
+    width: 22%;
+    min-width: 120px;
+  }
+  .cc-max {
+    font-weight: 700;
+  }
+  .cc-fuerte {
+    font-weight: 700;
+  }
+  .cc-helada {
+    color: var(--color-helada-texto);
+    font-weight: 700;
+  }
+  .cc-extremo {
+    font-weight: 700;
+  }
+  /* Botones de orden (los crea el script) */
+  .cc-tabla .cc-orden {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    min-height: 44px;
+    margin-block: -10px;
+    padding: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: inherit;
+  }
+  .cc-tabla .cc-orden:hover {
+    color: var(--color-almagra-oscuro);
+  }
+  .cc-tabla th[aria-sort] {
+    color: var(--color-basalto);
+  }
+  .cc-tabla .cc-orden svg {
+    flex-shrink: 0;
+    opacity: 0.35;
+  }
+  .cc-tabla th[aria-sort] .cc-orden svg {
+    opacity: 1;
+  }
+  .cc-tabla th[aria-sort="descending"] .cc-orden svg {
+    transform: rotate(180deg);
+  }
+  .cc-nota {
+    max-width: 100ch;
+    margin: 0;
+  }
+  @media (max-width: 47.99rem) {
+    .cc-tabla {
+      min-width: 540px;
+    }
+    .cc-col-rango {
+      display: none;
+    }
+    /* En móvil el cielo queda en el icono; el texto sigue para lectores de pantalla */
+    .cc-cielo-txt {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+      white-space: nowrap;
+    }
+    .cc-tabla thead th,
+    .cc-tabla tbody td {
+      padding-inline: 8px;
+    }
+  }
+</style>
+
+<script>
+  // Conmutador de día y orden de las tablas. Las dos tablas se ordenan a la vez por la misma columna.
+  for (const raiz of document.querySelectorAll<HTMLElement>("[data-cc]")) {
+    const botonesDia = Array.from(raiz.querySelectorAll<HTMLButtonElement>("[data-cc-dia]"));
+    const paneles = Array.from(raiz.querySelectorAll<HTMLElement>("[data-cc-panel]"));
+    const elegirDia = (id: string) => {
+      for (const b of botonesDia) b.setAttribute("aria-pressed", String(b.dataset.ccDia === id));
+      for (const p of paneles) p.hidden = p.dataset.ccPanel !== id;
+    };
+    for (const b of botonesDia) b.addEventListener("click", () => elegirDia(b.dataset.ccDia ?? "hoy"));
+    elegirDia("hoy");
+
+    const tablas = Array.from(raiz.querySelectorAll<HTMLTableElement>(".cc-tabla"));
+    let clave = "nombre";
+    let ascendente = true;
+    const ordenar = () => {
+      for (const t of tablas) {
+        const cuerpo = t.tBodies[0];
+        const filas = Array.from(cuerpo.rows);
+        filas.sort((a, b) => {
+          if (clave === "nombre") return (a.dataset.nombre ?? "").localeCompare(b.dataset.nombre ?? "", "es") * (ascendente ? 1 : -1);
+          const va = a.dataset[clave] ?? "";
+          const vb = b.dataset[clave] ?? "";
+          if (va === "" || vb === "") return va === vb ? 0 : va === "" ? 1 : -1; // sin dato, al final
+          return (Number(va) - Number(vb)) * (ascendente ? 1 : -1) || (a.dataset.nombre ?? "").localeCompare(b.dataset.nombre ?? "", "es");
+        });
+        cuerpo.append(...filas);
+        for (const th of t.querySelectorAll<HTMLElement>("th[data-orden]")) {
+          if (th.dataset.orden === clave) th.setAttribute("aria-sort", ascendente ? "ascending" : "descending");
+          else th.removeAttribute("aria-sort");
+        }
+      }
+    };
+    const ICONO =
+      '<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true" focusable="false"><path d="M2 8l4-4 4 4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    for (const t of tablas)
+      for (const th of t.querySelectorAll<HTMLElement>("th[data-orden]")) {
+        const boton = document.createElement("button");
+        boton.type = "button";
+        boton.className = "cc-orden";
+        boton.innerHTML = `<span>${th.textContent?.trim() ?? ""}</span>${ICONO}`;
+        boton.addEventListener("click", () => {
+          const nueva = th.dataset.orden ?? "nombre";
+          // Primera pulsación: el nombre de la A a la Z; las cifras, de mayor a menor (la mínima, de menor a mayor)
+          ascendente = nueva === clave ? !ascendente : nueva === "nombre" || nueva === "min";
+          clave = nueva;
+          ordenar();
+        });
+        th.replaceChildren(boton);
+      }
+  }
+</script>

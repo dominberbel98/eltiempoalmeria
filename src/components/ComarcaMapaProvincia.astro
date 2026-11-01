@@ -1,0 +1,127 @@
+---
+// Mapa SVG de la provincia con sus 7 comarcas, generado en el build, para fondos de basalto. Cada comarca es un
+// enlace a su página. La lista de comarcas que acompaña al mapa es la alternativa accesible.
+import { COLOR } from "./mapa/escalas";
+import { cajaProvincia, centro, proyectar, provincias, terminos, trazado, unionTerminos } from "./ComarcaGeo";
+import type { Comarca } from "../lib/comarcas";
+
+type Props = { comarcas: Comarca[]; base: string };
+const { comarcas, base } = Astro.props;
+
+const ANCHO = 600;
+const proy = proyectar(cajaProvincia(), ANCHO, 0.03);
+const todos = terminos();
+const { vecinas } = provincias();
+
+// Rótulo en una o dos líneas y ajuste a mano del centro (en unidades del lienzo) donde el centro geométrico cae mal
+const ROTULOS: Record<string, { lineas: string[]; dx?: number; dy?: number }> = {
+  "poniente-almeriense": { lineas: ["Poniente"], dx: -6, dy: 18 },
+  "metropolitana-de-almeria": { lineas: ["Metropolitana"], dx: 12, dy: 16 },
+  "alpujarra-almeriense": { lineas: ["Alpujarra"], dx: -8, dy: -6 },
+  "filabres-tabernas": { lineas: ["Filabres-", "Tabernas"], dy: 4 },
+  "levante-almeriense": { lineas: ["Levante"], dx: 10, dy: 10 },
+  "valle-del-almanzora": { lineas: ["Almanzora"], dy: 4 },
+  "los-velez": { lineas: ["Los Vélez"], dy: 4 },
+};
+const ALTO_LINEA = 24;
+
+const zonas = comarcas.map((c) => {
+  const union = unionTerminos(c.municipios);
+  const [lon, lat] = centro(union);
+  const r = ROTULOS[c.slug] ?? { lineas: [c.nombre] };
+  const lineas = r.lineas;
+  return {
+    c,
+    terminos: c.municipios.map((id) => todos.get(id)).filter((mp) => mp != null).map((mp) => trazado(mp, proy, 2)),
+    contorno: trazado(union, proy, 1),
+    x: Math.round(proy.x(lon) + (r.dx ?? 0)),
+    y: Math.round(proy.y(lat) + (r.dy ?? 0) - ((lineas.length - 1) * ALTO_LINEA) / 2),
+    lineas,
+  };
+});
+---
+
+<figure class="comarcas-provincia">
+  <svg viewBox={`0 0 ${proy.ancho} ${proy.alto}`} role="group" aria-labelledby="comarcas-provincia-pie" preserveAspectRatio="xMidYMid meet">
+    <g fill="none" stroke={COLOR.lineaOscura} stroke-width="1" aria-hidden="true">
+      {vecinas.map((mp) => <path d={trazado(mp, proy, 2)} />)}
+    </g>
+    {
+      zonas.map((z) => (
+        <a href={`${base}comarcas/${z.c.slug}/`} aria-label={`${z.c.nombre}, ${z.c.municipios.length} municipios`}>
+          <g class="cp-terminos">
+            {z.terminos.map((d) => (
+              <path d={d} />
+            ))}
+          </g>
+          <path class="cp-contorno" d={z.contorno} />
+          <text class="cp-rotulo" x={z.x} y={z.y} text-anchor="middle">
+            {z.lineas.map((l, i) => (
+              <tspan x={z.x} dy={i === 0 ? 0 : ALTO_LINEA}>
+                {l}
+              </tspan>
+            ))}
+          </text>
+        </a>
+      ))
+    }
+  </svg>
+  <figcaption id="comarcas-provincia-pie" class="comarcas-provincia-pie">Las 7 comarcas de la provincia de Almería. Pulsa una para ver su previsión.</figcaption>
+</figure>
+
+<style is:global>
+  /* Global con prefijo propio: evita un atributo data-astro-cid en cada celda o trazado */
+  .comarcas-provincia {
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .comarcas-provincia svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 640px;
+  }
+  .cp-terminos path {
+    fill: var(--color-basalto-2);
+    stroke: var(--color-linea-oscura);
+    stroke-width: 1;
+    stroke-linejoin: round;
+    transition: fill 0.15s;
+  }
+  .cp-contorno {
+    fill: none;
+    stroke: var(--color-suave-oscuro);
+    stroke-width: 2;
+    stroke-linejoin: round;
+    pointer-events: none;
+  }
+  .cp-rotulo {
+    fill: var(--color-cal);
+    font-size: 21px;
+    font-weight: 700;
+    font-stretch: 62%;
+    paint-order: stroke;
+    stroke: var(--color-basalto-2);
+    stroke-width: 5px;
+    stroke-linejoin: round;
+    pointer-events: none;
+  }
+  .comarcas-provincia a:hover .cp-terminos path,
+  .comarcas-provincia a:focus-visible .cp-terminos path {
+    fill: var(--color-borde-oscuro);
+  }
+  .comarcas-provincia a:hover .cp-rotulo,
+  .comarcas-provincia a:focus-visible .cp-rotulo {
+    fill: var(--color-almagra-claro);
+    stroke: var(--color-borde-oscuro);
+  }
+  .comarcas-provincia a:focus-visible {
+    outline: 3px solid var(--color-almagra-claro);
+  }
+  .comarcas-provincia-pie {
+    font-size: 14px;
+    color: var(--color-suave-oscuro);
+  }
+</style>

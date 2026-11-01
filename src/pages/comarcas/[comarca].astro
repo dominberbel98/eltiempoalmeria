@@ -1,0 +1,260 @@
+---
+// /comarcas/{slug}/: el tiempo de hoy y mañana en los municipios de una comarca (Orden de 14/03/2003, BOJA n.º 59).
+// Banda de basalto con el mapa de la comarca (máxima de hoy por término), resumen de hoy y de mañana, comparativa
+// municipio a municipio y la norma de la que salen las comarcas.
+import Base from "../../layouts/Base.astro";
+import Buscador from "../../components/Buscador";
+import ComarcaMapa from "../../components/ComarcaMapa.astro";
+import ComarcaDia from "../../components/ComarcaDia.astro";
+import ComarcaComparativa from "../../components/ComarcaComparativa.astro";
+import { comparativaComarca, fuenteComarcas, getComarcas, type Comarca } from "../../lib/comarcas";
+import { getMeta } from "../../lib/datos";
+import { diaConNumero, fmt } from "../../lib/tiempo";
+import { unirNombres } from "../../lib/agro";
+
+export function getStaticPaths() {
+  return getComarcas().map((comarca) => ({ params: { comarca: comarca.slug }, props: { comarca } }));
+}
+
+const { comarca } = Astro.props as { comarca: Comarca };
+const base = import.meta.env.BASE_URL;
+const meta = getMeta();
+const cc = comparativaComarca(comarca)!;
+const fuente = fuenteComarcas();
+const notas = fuente.notas.filter((n) => n.includes(comarca.nombre));
+const otras = getComarcas().filter((c) => c.slug !== comarca.slug);
+
+// "la comarca del Poniente Almeriense": el nombre con su artículo, para las frases y el título
+const CON_ARTICULO: Record<string, string> = {
+  "poniente-almeriense": "del Poniente Almeriense",
+  "metropolitana-de-almeria": "Metropolitana de Almería",
+  "alpujarra-almeriense": "de la Alpujarra Almeriense",
+  "filabres-tabernas": "de Filabres-Tabernas",
+  "levante-almeriense": "del Levante Almeriense",
+  "valle-del-almanzora": "del Valle del Almanzora",
+  "los-velez": "de Los Vélez",
+};
+const nombreFrase = `la comarca ${CON_ARTICULO[comarca.slug] ?? comarca.nombre}`;
+const n = cc.filas.length;
+
+// Mapa: máxima de hoy por municipio
+const valores = Object.fromEntries(cc.filas.map((f) => [f.municipio.id, f.hoy?.max ?? null]));
+const rh = cc.resumenHoy;
+const horquillaHoy =
+  rh?.maxMasBaja && rh.maxMasAlta
+    ? Math.round(rh.maxMasBaja.valor) === Math.round(rh.maxMasAlta.valor)
+      ? `${fmt(rh.maxMasAlta.valor)} °C`
+      : `de ${fmt(rh.maxMasBaja.valor)} a ${fmt(rh.maxMasAlta.valor)} °C`
+    : null;
+const diaHoy = diaConNumero(cc.hoy).toLowerCase();
+const diaManana = diaConNumero(cc.manana).toLowerCase();
+
+const titulo = `El tiempo en ${nombreFrase} (Almería)`;
+const descripcion = `Previsión del tiempo en ${nombreFrase} (Almería) para hoy y mañana en sus ${n} municipios: máximas, mínimas, lluvia, rachas y tormentas, municipio a municipio.${
+  horquillaHoy ? ` Hoy, máximas ${horquillaHoy}.` : ""
+}`;
+const url = new URL(`${base}comarcas/${comarca.slug}/`, Astro.site).href;
+const jsonLd = {
+  "@context": "https://schema.org",
+  "@type": "WebPage",
+  name: titulo,
+  description: descripcion,
+  url,
+  inLanguage: "es-ES",
+  dateModified: meta.updatedAt || new Date().toISOString(),
+  about: {
+    "@type": "AdministrativeArea",
+    name: `Comarca ${CON_ARTICULO[comarca.slug] ?? comarca.nombre}`,
+    containedInPlace: { "@type": "AdministrativeArea", name: "Provincia de Almería" },
+    containsPlace: cc.filas.map((f) => ({ "@type": "City", name: f.municipio.nombre, url: new URL(`${base}${f.municipio.slug}/`, Astro.site).href })),
+  },
+  breadcrumb: {
+    "@type": "BreadcrumbList",
+    itemListElement: [
+      { "@type": "ListItem", position: 1, name: "Provincia de Almería", item: new URL(base, Astro.site).href },
+      { "@type": "ListItem", position: 2, name: "Comarcas", item: new URL(`${base}comarcas/`, Astro.site).href },
+      { "@type": "ListItem", position: 3, name: comarca.nombre, item: url },
+    ],
+  },
+};
+---
+
+<Base title={titulo} description={descripcion} jsonLd={jsonLd} ancho="completo">
+  <div slot="buscador"><Buscador client:idle base={base} version={meta.updatedAt} /></div>
+
+  <section class="banda-oscura" aria-labelledby="t-comarca">
+    <div class="contenedor comarca-banda">
+      <div class="comarca-texto">
+        <nav class="migas" aria-label="Migas de pan">
+          <a href={base}><span class="migas-largo">Provincia de Almería</span><span class="migas-corto">Provincia</span></a> /{" "}
+          <a href={`${base}comarcas/`}>Comarcas</a> / <span aria-current="page">{comarca.nombre}</span>
+        </nav>
+        <h1 id="t-comarca" class="titular titular-banda">
+          El tiempo en {nombreFrase}
+        </h1>
+        <p class="comarca-descripcion">{comarca.descripcion}</p>
+        <p class="texto-secundario comarca-municipios">
+          {n} municipios: {unirNombres(cc.filas.map((f) => f.municipio.nombre))}.
+        </p>
+      </div>
+      <div class="comarca-mapa-col">
+        <ComarcaMapa
+          comarca={comarca}
+          valores={valores}
+          leyenda={`Máxima prevista hoy, ${diaHoy}`}
+          descripcion={`Mapa de ${nombreFrase} con sus ${n} términos municipales coloreados según la máxima prevista hoy${horquillaHoy ? `, ${horquillaHoy}` : ""}. Los mismos datos están en la tabla municipio a municipio.`}
+        />
+      </div>
+    </div>
+  </section>
+
+  <div class="contenedor pila comarca-cuerpo">
+    <section aria-labelledby="t-resumen" class="comarca-resumen">
+      <h2 id="t-resumen" class="titular titular-2">Hoy y mañana en la comarca</h2>
+      <div class="comarca-dias">
+        <ComarcaDia resumen={cc.resumenHoy} titulo={`Hoy, ${diaHoy}`} base={base} total={n} id="t-dia-hoy" />
+        <ComarcaDia resumen={cc.resumenManana} titulo={`Mañana, ${diaManana}`} base={base} total={n} id="t-dia-manana" />
+      </div>
+    </section>
+
+    <ComarcaComparativa comparativa={cc} base={base} />
+
+    <section aria-labelledby="t-otras" class="comarca-otras">
+      <h2 id="t-otras" class="titular titular-3">Otras comarcas</h2>
+      <ul class="comarca-otras-lista" role="list">
+        {
+          otras.map((c) => (
+            <li>
+              <a class="boton-pastilla" href={`${base}comarcas/${c.slug}/`}>
+                {c.nombre}
+              </a>
+            </li>
+          ))
+        }
+      </ul>
+      <nav class="comarca-secciones" aria-label="Secciones">
+        <a class="boton" href={`${base}comarcas/`}>Todas las comarcas</a>
+        <a class="boton" href={`${base}observaciones/`}>Observaciones en tiempo real</a>
+      </nav>
+    </section>
+
+    <section aria-labelledby="t-fuente" class="comarca-fuente">
+      <h2 id="t-fuente" class="titular titular-4">De dónde salen las comarcas</h2>
+      <p class="nota">
+        Las comarcas son las del mapa de comarcas de Andalucía: {fuente.norma} (<a href={fuente.url}>{fuente.boletin}</a>).
+        {notas.map((t) => ` ${t}`)}
+      </p>
+      <p class="nota">
+        La previsión de cada municipio es la de AEMET y, donde falta, la del modelo Open-Meteo. La lluvia en milímetros y las rachas salen
+        de Open-Meteo.
+      </p>
+    </section>
+  </div>
+</Base>
+
+<style>
+  .comarca-banda {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 24px 48px;
+  }
+  .comarca-texto {
+    flex: 1 1 380px;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .comarca-texto h1 {
+    margin: 0;
+  }
+  .comarca-mapa-col {
+    flex: 1 1 420px;
+    min-width: 0;
+  }
+  .banda-oscura .migas {
+    color: var(--color-suave-oscuro);
+    margin: -8px 0 0;
+  }
+  .migas-corto {
+    display: none;
+  }
+  @media (max-width: 47.99rem) {
+    .migas {
+      font-size: 14px;
+    }
+    .migas-largo {
+      display: none;
+    }
+    .migas-corto {
+      display: inline;
+    }
+  }
+  .comarca-descripcion {
+    margin: 0;
+    max-width: 52ch;
+    font-size: 18px;
+    line-height: 1.5;
+    color: var(--color-texto-oscuro);
+  }
+  .comarca-municipios {
+    margin: 0;
+    max-width: 64ch;
+    font-size: 15px;
+  }
+  .comarca-cuerpo {
+    padding-block: 32px 24px;
+  }
+  @media (min-width: 48rem) {
+    .comarca-cuerpo {
+      padding-block: 48px 24px;
+    }
+  }
+  .comarca-resumen h2 {
+    margin: 0 0 16px;
+  }
+  .comarca-dias {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 16px;
+  }
+  @media (min-width: 64rem) {
+    .comarca-dias {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+  .comarca-otras {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .comarca-otras h2 {
+    margin: 0;
+  }
+  .comarca-otras-lista {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .comarca-secciones {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .comarca-fuente {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .comarca-fuente h2,
+  .comarca-fuente p {
+    margin: 0;
+  }
+  .comarca-fuente p {
+    max-width: 100ch;
+  }
+</style>

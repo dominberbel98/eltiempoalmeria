@@ -1,0 +1,231 @@
+---
+// Serie horaria de una estación, plegable (<details>, sin JavaScript): curva de temperatura con la lluvia de cada
+// hora (decorativa) y la tabla de lecturas, de la más reciente a la más antigua, que es su alternativa accesible.
+import { fmtGrados, fmtKmh, fmtLluvia } from "./mapa/escalas";
+import { fmtNum } from "../lib/agro";
+import { textoAntiguedad, type Estacion } from "../lib/observaciones";
+import { diaConNumero, rumbo } from "../lib/tiempo";
+
+type Props = { estacion: Estacion; base: string };
+const { estacion: e, base } = Astro.props;
+
+const ANCHO = 600;
+const ALTO = 140;
+const ARRIBA = 14;
+const ABAJO = 26; // franja de la lluvia
+const serie = e.serie;
+const temps = serie.map((l) => l.temp).filter((t): t is number => t != null);
+const tMin = temps.length ? Math.min(...temps) : 0;
+const tMax = temps.length ? Math.max(...temps) : 1;
+const margenT = Math.max(1, (tMax - tMin) * 0.12);
+const lo = tMin - margenT;
+const hi = tMax + margenT;
+const n = Math.max(1, serie.length - 1);
+const x = (i: number) => Math.round((i / n) * ANCHO * 10) / 10;
+const y = (t: number) => Math.round((ARRIBA + ((hi - t) / (hi - lo)) * (ALTO - ARRIBA - ABAJO)) * 10) / 10;
+
+// Curva partida donde faltan lecturas
+let d = "";
+let abierto = false;
+serie.forEach((l, i) => {
+  if (l.temp == null) {
+    abierto = false;
+    return;
+  }
+  d += `${abierto ? "L" : "M"}${x(i)} ${y(l.temp)}`;
+  abierto = true;
+});
+const precMax = Math.max(1, ...serie.map((l) => l.prec ?? 0));
+const anchoBarra = Math.max(4, Math.min(18, ANCHO / Math.max(1, serie.length) - 4));
+const barras = serie
+  .map((l, i) => ({ i, p: l.prec ?? 0 }))
+  .filter((b) => b.p > 0)
+  .map((b) => ({ x: x(b.i) - anchoBarra / 2, alto: Math.max(2, (b.p / precMax) * (ABAJO - 6)) }));
+
+const primera = serie[0];
+const ultima = serie.at(-1);
+const llovio = serie.some((l) => (l.prec ?? 0) > 0);
+const conPresion = serie.some((l) => l.pres != null);
+const conViento = serie.some((l) => l.viento != null || l.racha != null);
+const lecturas = [...serie].reverse();
+const horaConDia = (hora: string) => (ultima && hora.slice(0, 10) !== ultima.hora.slice(0, 10) ? `${diaConNumero(hora, true)}, ${hora.slice(11, 16)}` : hora.slice(11, 16));
+const metros = (n: number) => `${String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ".")} m`;
+const aLas = (hora: string) => {
+  const h = hora.slice(11, 16);
+  return `${h.startsWith("01:") ? "a la" : "a las"} ${h}`;
+};
+const extremos = [
+  e.tempMax24 ? `máxima de ${fmtGrados(e.tempMax24.valor)} ${aLas(e.tempMax24.hora)}` : null,
+  e.tempMin24 ? `mínima de ${fmtGrados(e.tempMin24.valor)} ${aLas(e.tempMin24.hora)}` : null,
+].filter(Boolean);
+// Frase de la serie, partida alrededor de la antigüedad (que el navegador vuelve a calcular)
+const lecturasTxt = serie.length === 1 ? "1 lectura horaria" : `${serie.length} lecturas horarias`;
+const antes = ultima ? `${lecturasTxt}, la última ${aLas(ultima.hora)} (` : `${lecturasTxt}.`;
+const despues = `${ultima ? ")." : ""}${extremos.length ? ` Temperatura ${extremos.join(" y ")}.` : ""}${
+  e.prec24 != null ? (llovio ? ` Lluvia acumulada: ${fmtLluvia(e.prec24)}.` : " Sin lluvia.") : ""
+}`;
+---
+
+<details class="panel obs-serie" id={`serie-${e.idema}`}>
+  <summary>
+    <span class="obs-serie-nombre">{e.nombre}</span>
+    <span class="obs-serie-resumen">
+      {e.ultima ? `${fmtGrados(e.ultima.temp)} ${aLas(e.ultima.hora)}` : "Sin datos"}
+      {e.atrasada && <span class="obs-serie-retraso">, dato con retraso</span>}
+    </span>
+  </summary>
+  <div class="obs-serie-cuerpo">
+    {
+      !serie.length ? (
+        <p class="texto-secundario">Esta estación no tiene lecturas en las últimas 24 horas.</p>
+      ) : (
+        <>
+          <p class="obs-serie-texto">
+            {antes}
+            {ultima && <span data-hace={ultima.fint}>{textoAntiguedad(e.edadMin)}</span>}
+            {despues}
+            {e.municipio && (
+              <>
+                {" "}
+                Altitud de la estación: {metros(e.alt)}.{" "}
+                <a href={`${base}${e.municipio.slug}/`}>Previsión de {e.municipio.nombre}</a>.
+              </>
+            )}
+          </p>
+          {temps.length > 1 && (
+            <div class="obs-serie-grafica" aria-hidden="true">
+              <svg viewBox={`0 0 ${ANCHO} ${ALTO}`} preserveAspectRatio="none">
+                <line x1="0" x2={ANCHO} y1={ALTO - ABAJO + 2} y2={ALTO - ABAJO + 2} class="obs-serie-base" />
+                {barras.map((b) => (
+                  <rect x={b.x} y={ALTO - b.alto} width={anchoBarra} height={b.alto} class="obs-serie-lluvia" />
+                ))}
+                <path d={d} class="obs-serie-linea" />
+              </svg>
+              <div class="obs-serie-ejes">
+                <span>{primera ? horaConDia(primera.hora) : ""}</span>
+                <span>{ultima ? horaConDia(ultima.hora) : ""}</span>
+              </div>
+            </div>
+          )}
+          <div class="tabla-desplazable" tabindex="0" role="region" aria-label={`Lecturas horarias de ${e.nombre}`}>
+            <table class="tabla obs-serie-tabla">
+              <caption class="sr-only">Lecturas horarias de la estación {e.nombre}, de la más reciente a la más antigua</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Hora</th>
+                  <th scope="col" class="num">Temperatura</th>
+                  <th scope="col" class="num">Humedad</th>
+                  {conViento && <th scope="col" class="num">Viento</th>}
+                  {conViento && <th scope="col" class="num">Racha</th>}
+                  <th scope="col" class="num">Lluvia</th>
+                  {conPresion && <th scope="col" class="num">Presión</th>}
+                </tr>
+              </thead>
+              <tbody>
+                {lecturas.map((l) => (
+                  <tr class:list={{ "fila-lluviosa": (l.prec ?? 0) > 0 }}>
+                    <th scope="row">{horaConDia(l.hora)}</th>
+                    <td class="num">{fmtGrados(l.temp)}</td>
+                    <td class="num">{l.hum == null ? "—" : `${Math.round(l.hum)} %`}</td>
+                    {conViento && (
+                      <td class="num">{l.viento == null ? "—" : l.viento === 0 ? "En calma" : `${fmtKmh(l.viento)}${l.dir != null ? ` ${rumbo(l.dir)}` : ""}`}</td>
+                    )}
+                    {conViento && <td class="num">{l.racha == null ? "—" : `${fmtKmh(l.racha)}${l.dirRacha != null ? ` ${rumbo(l.dirRacha)}` : ""}`}</td>}
+                    <td class="num texto-lluvia">{fmtLluvia(l.prec)}</td>
+                    {conPresion && <td class="num">{l.pres == null ? "—" : `${fmtNum(l.pres, 1)} hPa`}</td>}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {!conViento && <p class="nota">Esta estación no mide el viento.</p>}
+          {conPresion && <p class="nota">Presión en la estación, sin reducir al nivel del mar.</p>}
+        </>
+      )
+    }
+  </div>
+</details>
+
+<style is:global>
+  /* Global con prefijo propio: evita un atributo data-astro-cid en cada celda o trazado */
+  .obs-serie {
+    padding: 0;
+  }
+  .obs-serie summary {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 2px 16px;
+    min-height: 56px;
+    padding: 14px 18px;
+    list-style-position: inside;
+  }
+  .obs-serie summary:hover .obs-serie-nombre {
+    color: var(--color-almagra);
+  }
+  .obs-serie-nombre {
+    font-size: 18px;
+    font-weight: 700;
+  }
+  .obs-serie-resumen {
+    font-size: 15px;
+    color: var(--color-ceniza);
+  }
+  .obs-serie-retraso {
+    color: var(--color-almagra-oscuro);
+    font-weight: 600;
+  }
+  .obs-serie-cuerpo {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 0 18px 18px;
+  }
+  .obs-serie-texto {
+    margin: 0;
+    max-width: 80ch;
+    color: var(--color-gris-texto);
+  }
+  .obs-serie-grafica svg {
+    display: block;
+    width: 100%;
+    height: 120px;
+  }
+  .obs-serie-linea {
+    fill: none;
+    stroke: var(--color-almagra);
+    stroke-width: 2.5;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+    vector-effect: non-scaling-stroke;
+  }
+  .obs-serie-lluvia {
+    fill: var(--color-mar);
+  }
+  .obs-serie-base {
+    stroke: var(--color-linea);
+    stroke-width: 1;
+    vector-effect: non-scaling-stroke;
+  }
+  .obs-serie-ejes {
+    display: flex;
+    justify-content: space-between;
+    font-size: 13px;
+    color: var(--color-ceniza);
+  }
+  .obs-serie-tabla {
+    min-width: 560px;
+  }
+  .obs-serie-tabla td {
+    white-space: nowrap;
+  }
+  .obs-serie-tabla tbody th,
+  .obs-serie-tabla tbody td {
+    padding-block: 7px;
+  }
+  .obs-serie-tabla tbody th {
+    font-weight: 600;
+    white-space: nowrap;
+  }
+</style>
