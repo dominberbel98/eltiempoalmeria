@@ -61,6 +61,7 @@ Sitio estático: los datos se descargan en GitHub Actions, se generan las págin
 - Si falta el dato de AEMET de un municipio, la página usa Open-Meteo y lo indica. Nunca se rompe el build por un municipio.
 - Mostrar siempre la hora de última actualización (`meta.updatedAt`: el dato de predicción u observación más reciente; la RIA no cuenta) y avisar si tiene más de 2 h.
 - Atribución obligatoria en el pie: "Información elaborada por la Agencia Estatal de Meteorología", "Weather data by Open-Meteo.com (CC BY 4.0)", IGN (CC BY 4.0) e INE; en `/agro/`, la de la RIA; en `/radar/`, "Radar de Almería (Níjar), © AEMET" con enlace al aviso legal; en `/playas/`, `ATRIBUCION_PLAYAS`; en `/mar/`, la del boletín FQXX47; en `/calima/`, `ATRIBUCION_CAMS` (Copernicus).
+- Analítica: Cloudflare Web Analytics (script `beacon.min.js` en `Base.astro`, solo en producción, sin cookies; el pie lo menciona). No añadir otra analítica ni nada que use cookies sin banner de consentimiento.
 - Fechas y horas en zona `Europe/Madrid`, formato español.
 - Copy en español, en frase normal. Prohibido en la interfaz: etiquetas en mayúsculas, cadenas "A · B · C", numeraciones decorativas, "→" en enlaces y emojis.
 - Accesibilidad: botones y enlaces reales, `aria-pressed` en conmutadores, contraste AA, objetivos táctiles ≥44 px, `prefers-reduced-motion`. Todo mapa o gráfica tiene alternativa en tabla o lista.

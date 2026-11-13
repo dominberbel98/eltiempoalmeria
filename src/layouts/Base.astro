@@ -35,6 +35,8 @@ type Props = {
 
 const { title, description, jsonLd, activo, ancho = "contenedor", ria = false, noindex = false } = Astro.props;
 const base = import.meta.env.BASE_URL;
+// Identificador público del sitio en Cloudflare Web Analytics (va en el HTML, no es un secreto)
+const TOKEN_ANALITICA = "0e1a5a25987a41c08120a61d05f9c5e8";
 const meta = getMeta();
 const canonical = new URL(Astro.url.pathname, Astro.site).href;
 const conBuscador = Astro.slots.has("buscador");
@@ -227,6 +229,7 @@ const jsonLdTexto = jsonLd ? JSON.stringify(jsonLd).replace(/</g, "\\u003c") : n
           }
         </p>
         <slot name="pie" />
+        <p>Las visitas se cuentan con Cloudflare Web Analytics, sin cookies y sin identificar a nadie.</p>
       </div>
     </footer>
 
@@ -266,5 +269,7 @@ const jsonLdTexto = jsonLd ? JSON.stringify(jsonLd).replace(/</g, "\\u003c") : n
         abierto.focus();
       });
     </script>
+    {/* Cloudflare Web Analytics: contador de visitas sin cookies. Solo en el build de producción */}
+    {import.meta.env.PROD && <script is:inline defer src="https://static.cloudflareinsights.com/beacon.min.js" data-cf-beacon={JSON.stringify({ token: TOKEN_ANALITICA })} />}
   </body>
 </html>
