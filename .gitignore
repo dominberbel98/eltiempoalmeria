@@ -13,3 +13,6 @@ src/data/
 
 # Imágenes de radar descargadas en cada ejecución
 public/radar/
+
+# Cloudflare (wrangler)
+.wrangler/

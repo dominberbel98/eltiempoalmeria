@@ -1,0 +1,11 @@
+name = "cron-eltiempoalmeria"
+main = "worker.js"
+compatibility_date = "2026-10-01"
+workers_dev = false
+
+[triggers]
+# Cada 15 min (UTC), a los mismos minutos que el schedule de .github/workflows/deploy.yml, que queda de respaldo
+crons = ["7,22,37,52 * * * *"]
+
+[observability]
+enabled = true
