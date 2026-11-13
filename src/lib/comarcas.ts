@@ -102,7 +102,7 @@ export type ResumenDia = {
   conLluvia: number; // municipios con prob ≥ UMBRAL_PROB_LLUVIA o precip ≥ 0,1 mm
   conTormenta: number; // municipios con tormenta ≥ UMBRAL_TORMENTA
   cielo: Cielo | null; // cielo más frecuente entre los municipios (a igualdad, el más adverso)
-  cieloTxt: string; // texto de ese cielo en el primer municipio que lo tiene
+  cieloTxt: string; // texto más repetido dentro de esa categoría de cielo
 };
 
 export type ComparativaComarca = {
@@ -177,8 +177,17 @@ function resumir(filas: FilaComparativa[], dia: "hoy" | "manana", fecha: string)
     conLluvia: dias.filter((d) => (d.prob ?? 0) >= UMBRAL_PROB_LLUVIA || (d.precip ?? 0) >= 0.1).length,
     conTormenta: dias.filter((d) => (d.tormenta ?? 0) >= UMBRAL_TORMENTA).length,
     cielo,
-    cieloTxt: dias.find((d) => d.cielo === cielo)?.cieloTxt ?? "",
+    cieloTxt: textoMasFrecuente(dias.filter((d) => d.cielo === cielo).map((d) => d.cieloTxt)),
   };
+}
+
+/** Texto que más se repite (una categoría de cielo agrupa "Nuboso" e "Intervalos nubosos"); a igualdad, el primero. */
+function textoMasFrecuente(textos: string[]): string {
+  const n = new Map<string, number>();
+  for (const t of textos) if (t) n.set(t, (n.get(t) ?? 0) + 1);
+  let mejor = "";
+  for (const [t, c] of n) if (c > (n.get(mejor) ?? 0)) mejor = t;
+  return mejor;
 }
 
 /**

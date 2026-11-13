@@ -1,6 +1,6 @@
 ---
 // /playas/: predicción de AEMET para hoy y mañana de las 22 playas de Almería, agrupadas por municipio y ordenadas a lo
-// largo de la costa, de Adra a Pulpí. Filtros por comarca y "solo mar en calma" con un script pequeño; sin JavaScript
+// largo de la costa, de Adra a Pulpí. Filtros por comarca y "solo mar tranquila" con un script pequeño; sin JavaScript
 // se ven todas las playas y los filtros no aparecen.
 import Base from "../../layouts/Base.astro";
 import IconoCielo from "../../components/IconoCielo";
@@ -95,7 +95,7 @@ const CLASE_ESTADO: Record<EstadoMar, string> = {
 };
 const conCalmaHoy = tarjetas.filter((t) => t.hoy.estado === "buena").length;
 const conDatosHoy = tarjetas.filter((t) => t.hoy.dia).length;
-// "Mar movida en Retamar, La Romanilla y 4 más." (de oeste a este); con todas en calma, la frase de la librería
+// "Mar movida en Retamar, La Romanilla y 4 más." (de oeste a este); con todas tranquilas, la frase de la librería
 const listaFmt = new Intl.ListFormat("es", { style: "long", type: "conjunction" });
 const nombres = (ts: Tarjeta[]) => {
   const n = ts.map((t) => t.playa.nombre);
@@ -157,10 +157,10 @@ const jsonLd = {
           <>
             <p class="titular text-[clamp(2rem,1.7rem+1.2vw,2.75rem)] leading-[1.02]">
               {conCalmaHoy === conDatosHoy
-                ? "Mar en calma en todas las playas"
+                ? "Mar tranquila en todas las playas"
                 : conCalmaHoy
-                  ? `Mar en calma en ${conCalmaHoy} de ${conDatosHoy} playas`
-                  : "Ninguna playa con el mar en calma"}
+                  ? `Mar tranquila en ${conCalmaHoy} de ${conDatosHoy} playas`
+                  : "Ninguna playa con la mar tranquila"}
             </p>
             {fraseHoy && <p class="leading-normal text-texto-oscuro">{fraseHoy}</p>}
             <dl class="datos-clave md:grid-cols-2">
@@ -181,7 +181,7 @@ const jsonLd = {
     </div>
   </section>
 
-  <div class="filtros flex flex-col gap-3" data-filtros-playas>
+  <div class="pl-filtros flex flex-col gap-3" data-filtros-playas>
     <div class="flex flex-wrap items-center gap-x-6 gap-y-3">
       <div class="chips chips-claro" role="group" aria-label="Filtrar por comarca">
         <button type="button" aria-pressed="true" data-comarca="todas">Toda la costa</button>
@@ -193,13 +193,13 @@ const jsonLd = {
           ))
         }
       </div>
-      <button type="button" class="boton-pastilla" aria-pressed="false" data-calma>Solo mar en calma hoy</button>
+      <button type="button" class="boton-pastilla" aria-pressed="false" data-calma>Solo mar tranquila hoy</button>
     </div>
     <p class="nota" aria-live="polite" data-recuento>Se ven las {tarjetas.length} playas.</p>
   </div>
 
   <p class="aviso aviso-info" data-sin-resultados hidden>
-    Ninguna playa de esta comarca tiene hoy el mar en calma. Quita el filtro para ver todas.
+    Ninguna playa de esta comarca tiene hoy la mar tranquila. Quita el filtro para ver todas.
   </p>
 
   <div class="flex flex-col gap-10 md:gap-12">
@@ -216,9 +216,15 @@ const jsonLd = {
           </div>
           <ul class="m-0 grid list-none grid-cols-1 gap-4 p-0 lg:grid-cols-2" role="list">
             {g.tarjetas.map((t) => (
-              <li class="panel flex flex-col gap-4 p-4 md:p-5" data-playa data-calma-hoy={String(t.hoy.estado === "buena")}>
+              <li class="group panel relative flex flex-col gap-4 p-4 md:p-5" data-playa data-calma-hoy={String(t.hoy.estado === "buena")}>
                 <h3 class="titular titular-4">
-                  <a href={`${base}playas/${t.playa.slug}/`}>{t.playa.nombre}</a>
+                  {/* Toda la tarjeta es el objetivo del enlace (como en ResumenComarcas) */}
+                  <a
+                    class="no-underline group-hover:text-almagra group-hover:underline after:absolute after:inset-0 after:rounded-[4px] after:content-[''] focus-visible:outline-none focus-visible:after:outline-3 focus-visible:after:outline-offset-2 focus-visible:after:outline-almagra"
+                    href={`${base}playas/${t.playa.slug}/`}
+                  >
+                    {t.playa.nombre}
+                  </a>
                 </h3>
                 <div class="grid grid-cols-2 gap-x-4 gap-y-4 sm:gap-x-6">
                   {[t.hoy, t.manana].map((d) => (
@@ -284,7 +290,7 @@ const jsonLd = {
         {" "}{NOTA_ELABORACION}
       </p>
       <p>
-        El oleaje y el viento son los de AEMET: oleaje débil, moderado o fuerte y viento flojo, moderado o fuerte. «Mar en calma» quiere decir
+        El oleaje y el viento son los de AEMET: oleaje débil, moderado o fuerte y viento flojo, moderado o fuerte. «Mar tranquila» quiere decir
         oleaje débil y viento flojo todo el día; «mar fuerte», oleaje o viento fuerte en algún momento del día. En la ficha de cada playa está
         además la altura de la ola del modelo Open-Meteo.
       </p>
@@ -297,15 +303,16 @@ const jsonLd = {
   <p slot="pie">{ATRIBUCION_PLAYAS}</p>
 </Base>
 
-<style>
-  /* Los filtros solo funcionan con JavaScript: sin él no se muestran */
-  :global(html:not(.js)) .filtros {
+<style is:global>
+  /* Los filtros solo funcionan con JavaScript: sin él no se muestran. Global con prefijo pl-: un <style> con ámbito
+     repetiría data-astro-cid en los más de mil nodos de la página */
+  html:not(.js) .pl-filtros {
     display: none;
   }
 </style>
 
 <script>
-  // Filtros de /playas/: una comarca (o toda la costa) y "solo mar en calma hoy". Ocultan tarjetas y municipios vacíos.
+  // Filtros de /playas/: una comarca (o toda la costa) y "solo mar tranquila hoy". Ocultan tarjetas y municipios vacíos.
   const raiz = document.querySelector<HTMLElement>("[data-filtros-playas]");
   if (raiz) {
     const botonesComarca = Array.from(raiz.querySelectorAll<HTMLButtonElement>("[data-comarca]"));

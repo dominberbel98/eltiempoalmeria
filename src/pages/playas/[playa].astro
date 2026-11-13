@@ -210,7 +210,7 @@ const jsonLd = {
           </>
         ) : (
           <p class="leading-normal text-texto-oscuro">
-            AEMET no tiene ahora predicción para esta playa. Aparecerá aquí en cuanto publique la próxima edición, que suele llegar a media mañana.
+            AEMET no tiene ahora predicción para esta playa. Aparecerá aquí en cuanto publique la próxima edición, que suele llegar por la mañana.
           </p>
         )
       }
@@ -234,7 +234,8 @@ const jsonLd = {
                   </h3>
                   <span class={`rounded-[3px] px-2 py-0.5 text-[14px] font-semibold ${CLASE_ESTADO[estado]}`}>{TEXTO_ESTADO_MAR[estado]}</span>
                 </div>
-                <table class="tabla">
+                {/* A 320 px el panel deja unos 256 px: menos relleno lateral y el icono del cielo puede ir encima del texto */}
+                <table class="tabla max-sm:[&_:is(th,td)]:px-1.5">
                   <caption class="sr-only">Cielo, viento y oleaje por la mañana y por la tarde</caption>
                   <thead>
                     <tr>
@@ -248,7 +249,7 @@ const jsonLd = {
                       <th scope="row">Cielo</th>
                       {[d.cielo.manana, d.cielo.tarde].map((f) => (
                         <td>
-                          <span class="flex items-center gap-2">
+                          <span class="flex flex-wrap items-center gap-x-2 gap-y-1">
                             {cieloIcono(f.codigo) && <IconoCielo cielo={cieloIcono(f.codigo)!} size={22} />}
                             {franja(f, textoCielo)}
                           </span>
@@ -296,6 +297,14 @@ const jsonLd = {
             AEMET no tiene ahora predicción para esta playa. Mientras tanto, la previsión por horas de{" "}
             <a href={`${base}${m.slug}/`}>{m.nombre}</a> da la temperatura, el viento y la lluvia del municipio.
           </span>
+        </p>
+      )
+    }
+    {
+      dias.length > 0 && (
+        <p class="nota">
+          «Mar tranquila» quiere decir oleaje débil y viento flojo todo el día, según AEMET; «mar movida», oleaje o viento moderado en algún
+          momento, y «mar fuerte», oleaje o viento fuerte. No es la escala Douglas de la <a href={`${base}mar/`}>página del mar</a>.
         </p>
       )
     }

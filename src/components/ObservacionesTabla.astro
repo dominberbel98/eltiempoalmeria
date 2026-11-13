@@ -3,17 +3,15 @@
 // serie, humedad, viento, racha más fuerte y lluvia acumulada. Las estaciones atrasadas van destacadas.
 // La antigüedad se vuelve a calcular en el navegador (data-hace), por si la página tarda en regenerarse.
 import { fmtGrados, fmtKmh, fmtLluvia } from "./mapa/escalas";
-import { horaCorta, textoAntiguedad, type Estacion, type ValorHora } from "../lib/observaciones";
+import { horaCorta, textoAntiguedad, textoHoraLectura, type Estacion, type ValorHora } from "../lib/observaciones";
 import { rumbo } from "../lib/tiempo";
 
 type Props = { estaciones: Estacion[]; horas: number };
 const { estaciones, horas } = Astro.props;
 
-const aLas = (v: ValorHora | null) => {
-  if (!v) return null;
-  const h = v.hora.slice(11, 16);
-  return `${h.startsWith("01:") ? "a la" : "a las"} ${h}`;
-};
+// "a las 13:00" o, si no es de hoy, "el sábado 31 a las 13:00"
+const ahora = new Date();
+const aLas = (v: ValorHora | null) => (v ? textoHoraLectura(v.hora, ahora) : null);
 const metros = (n: number) => `${String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ".")} m`;
 const viento = (e: Estacion) => {
   const u = e.ultima;

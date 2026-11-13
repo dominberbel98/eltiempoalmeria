@@ -3,9 +3,11 @@
 // Banda de basalto con el estado y un mapa SVG estático de las 6 zonas de aviso (generado en el build a partir
 // de los términos municipales agrupados por zona y de los polígonos costeros del CAP), los avisos uno a uno,
 // las zonas, la tabla de los 103 municipios con su zona y nivel (alternativa del mapa) y qué significa cada nivel.
+// El estado (en vigor, previsto, terminado) se calcula en el build y un script lo recalcula en el navegador: el cron
+// de GitHub no siempre llega cada 15 min y una página de hace horas no debe enseñar en vigor un aviso que ya terminó.
 import polygonClipping from "polygon-clipping";
 import Base from "../layouts/Base.astro";
-import { getMunicipios } from "../lib/datos";
+import { getMeta, getMunicipios } from "../lib/datos";
 import { areaPoligonoHa, leerTerminos, type MultiPoligono, type Poligono } from "../lib/geozonas";
 import { ZONA, horasDesde, textoActualizacion } from "../lib/tiempo";
 import {
@@ -77,6 +79,9 @@ function textoMomento(iso: string | null | undefined): string | null {
 const plural = (n: number, uno: string, varios: string) => `${n} ${n === 1 ? uno : varios}`;
 
 const elaborado = textoMomento(datos?.elaborado);
+const calculado = textoMomento(ahora.toISOString());
+// Última comprobación de si había boletín nuevo (con el RSS de AEMET o descargando el tar)
+const comprobado = getMeta().fuentes.avisos?.comprobado ?? datos?.actualizado ?? null;
 // El módulo de descarga renueva avisos.json con cada boletín nuevo y, si no lo hay, cada 6 h
 const avisosDesfasados = datos != null && horasDesde(datos.actualizado) > 7;
 
@@ -246,6 +251,21 @@ const nombreZona = new Map(zonas.map((z) => [z.codigo, z.nombre]));
 const anclas = new Map(activos.map((a, i) => [a.id, `aviso-${i + 1}`]));
 const idAviso = (a: Aviso) => anclas.get(a.id) ?? "aviso";
 const mayuscula = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
+const zonasMunicipio = (id: string) => {
+  const z = zonasAvisoDeMunicipio(id);
+  return [z.tierra?.codigo, ...z.costa.map((c) => c.codigo)].filter(Boolean).join(" ");
+};
+
+// Datos para recalcular el estado en el navegador (solo los avisos que no habían terminado al generar la página)
+const datosCliente = {
+  calculado: ahora.getTime(),
+  municipios: municipios.length,
+  avisos: activos.map((a) => ({ ancla: idAviso(a), nivel: a.nivel, inicio: Date.parse(a.inicio), fin: Date.parse(a.fin), zonas: a.zonas.map((z) => z.codigo) })),
+  zonas: zonas.map((z) => ({ codigo: z.codigo, nombre: z.nombre, tipo: z.tipo })),
+  nombre: NOMBRE_NIVEL,
+  color: Object.fromEntries(NIVELES.map((n) => [n, { marca: VAR_NIVEL[n].marca, borde: VAR_NIVEL[n].borde, oscuro: COLOR_NIVEL[n].marcaOscuro }])),
+  tinta: COLOR_NIVEL.amarillo.tinta,
+};
 
 const jsonLd = {
   "@context": "https://schema.org",
@@ -275,40 +295,42 @@ const jsonLd = {
             nivelMax ? (
               <span
                 class="av-nivel av-nivel-grande"
+                data-av-nivel
                 style={`background:${COLOR_NIVEL[nivelMaxAhora ?? nivelMax].marcaOscuro};color:${COLOR_NIVEL.amarillo.tinta}`}
               >
-                Nivel {nivelMaxAhora ?? nivelMax}
-                {!nivelMaxAhora && ", previsto"}
+                {`Nivel ${nivelMaxAhora ?? nivelMax}${nivelMaxAhora ? "" : ", previsto"}`}
               </span>
             ) : (
-              <span class="av-nivel av-nivel-grande av-nivel-sin">{datos ? "Sin avisos" : "Sin datos"}</span>
+              <span class="av-nivel av-nivel-grande av-nivel-sin" data-av-nivel>
+                {datos ? "Sin avisos" : "Sin datos"}
+              </span>
             )
           }
           <p class="av-estado-texto">
-            <strong>{estado}.</strong> {detalleEstado}
+            <strong data-av-estado>{estado}.</strong> <span data-av-detalle>{detalleEstado}</span>
           </p>
         </div>
 
         <dl class="av-datos">
           <div>
             <dt>Zonas con aviso</dt>
-            <dd>{datos ? `${zonasConAviso} de ${zonas.length}` : "—"}</dd>
+            <dd data-av-zonas>{datos ? `${zonasConAviso} de ${zonas.length}` : "—"}</dd>
           </div>
           <div>
             <dt>Municipios con aviso en vigor</dt>
-            <dd>{datos ? `${conAvisoAhora} de ${municipios.length}` : "—"}</dd>
+            <dd data-av-mun-ahora>{datos ? `${conAvisoAhora} de ${municipios.length}` : "—"}</dd>
           </div>
-          {
-            conAvisoPrevisto > 0 && (
-              <div>
-                <dt>Con aviso previsto, aún no en vigor</dt>
-                <dd>{`${conAvisoPrevisto} de ${municipios.length}`}</dd>
-              </div>
-            )
-          }
+          <div data-av-fila-previsto hidden={conAvisoPrevisto === 0}>
+            <dt>Con aviso previsto, aún no en vigor</dt>
+            <dd data-av-mun-previsto>{`${conAvisoPrevisto} de ${municipios.length}`}</dd>
+          </div>
           <div>
             <dt>Último boletín de AEMET</dt>
             <dd>{elaborado ? elaborado.replace(/^el /, "") : "sin datos"}</dd>
+          </div>
+          <div>
+            <dt>Estado calculado</dt>
+            <dd data-av-calculado>{calculado ? calculado.replace(/^el /, "") : "—"}</dd>
           </div>
         </dl>
 
@@ -326,7 +348,7 @@ const jsonLd = {
       </div>
 
       <figure class="av-mapa-figura">
-        <div class="av-mapa" role="img" aria-label={descripcionMapa}>
+        <div class="av-mapa" role="img" aria-label={descripcionMapa} data-av-mapa>
           <svg viewBox={`0 0 ${ANCHO} ${ALTO}`} preserveAspectRatio="xMidYMid meet" focusable="false" aria-hidden="true">
             <defs>
               {
@@ -344,10 +366,11 @@ const jsonLd = {
                   d={f.d}
                   class:list={["av-costa", { "av-costa-sin": !relleno(f.zona.codigo) }]}
                   fill={relleno(f.zona.codigo) ?? undefined}
+                  data-zona={f.zona.codigo}
                 />
               ))
             }
-            {deTierra.map((f) => <path d={f.d} class="av-tierra" fill={relleno(f.zona.codigo) ?? "#263840"} />)}
+            {deTierra.map((f) => <path d={f.d} class="av-tierra" fill={relleno(f.zona.codigo) ?? "#263840"} data-zona={f.zona.codigo} />)}
             <path d={lineasMunicipios} class="av-municipios" />
             {deTierra.map((f) => <path d={f.d} class="av-borde-zona" />)}
           </svg>
@@ -355,7 +378,9 @@ const jsonLd = {
             rotulos.map((r) => (
               <span class:list={["av-rotulo", { "av-rotulo-costa": r.costa, "av-rotulo-derecha": r.derecha }]} style={`${r.derecha ? `right:${(100 - r.x).toFixed(1)}%` : `left:${r.x.toFixed(1)}%`};top:${r.y.toFixed(1)}%`} aria-hidden="true">
                 <span class="av-rotulo-nombre">{r.nombre}</span>
-                <span class="av-rotulo-estado">{r.estado}</span>
+                <span class="av-rotulo-estado" data-zona-rotulo={r.codigo}>
+                  {r.estado}
+                </span>
               </span>
             ))
           }
@@ -399,16 +424,20 @@ const jsonLd = {
           nota: vigentes.length ? null : "Ahora no hay ningún aviso en vigor. Estos son los que AEMET prevé para los próximos días.",
         },
       ]
-        .filter((g) => g.lista.length)
+        // Las dos secciones se generan aunque estén vacías: el script del final mueve las tarjetas que empiezan
         .map((g) => (
-          <section aria-labelledby={`t-${g.id}`} class="av-seccion">
+          <section aria-labelledby={`t-${g.id}`} class="av-seccion" hidden={!g.lista.length}>
             <h2 id={`t-${g.id}`} class="titular titular-2">
               {g.titulo}
             </h2>
-            {g.nota && <p class="texto-largo m-0">{g.nota}</p>}
-            <ul class="av-tarjetas" role="list">
+            {g.id === "proximos" && (
+              <p class="texto-largo m-0" data-av-nota-proximos hidden={!g.nota}>
+                Ahora no hay ningún aviso en vigor. Estos son los que AEMET prevé para los próximos días.
+              </p>
+            )}
+            <ul class="av-tarjetas" role="list" data-av-lista={g.id}>
               {g.lista.map((a) => (
-                <li>
+                <li data-aviso={idAviso(a)}>
                   <article class="av-tarjeta" id={idAviso(a)} style={`border-left-color:${VAR_NIVEL[a.nivel].borde}`} aria-labelledby={`${idAviso(a)}-t`}>
                     <header class="av-tarjeta-cabecera">
                       <span
@@ -422,10 +451,7 @@ const jsonLd = {
                       </h3>
                     </header>
                     <p class="av-cuando">
-                      <strong>
-                        {estadoAviso(a, ahora) === "vigente" ? "En vigor. " : "Previsto. "}
-                        {textoCuando(a, ahora)}.
-                      </strong>{" "}
+                      <strong data-av-cuando>{`${estadoAviso(a, ahora) === "vigente" ? "En vigor" : "Previsto"}. ${textoCuando(a, ahora)}.`}</strong>{" "}
                       <span class="texto-secundario">{mayuscula(textoIntervalo(a.inicio, a.fin))}.</span>
                     </p>
                     <dl class="av-tarjeta-datos">
@@ -459,15 +485,13 @@ const jsonLd = {
         ))
     }
 
-    {
-      !activos.length && (
-        <p class="aviso aviso-info av-sin-avisos" role="status">
-          {datos
-            ? "No hay avisos activos en Almería. Si AEMET emite uno, aparecerá aquí y en la página de cada municipio afectado."
-            : "No hay datos de avisos en esta actualización. Mientras tanto, consulta los avisos en la web de AEMET."}
-        </p>
-      )
-    }
+    <p class="aviso aviso-info av-sin-avisos" role="status" data-av-sin hidden={activos.length > 0}>
+      {
+        datos
+          ? "No hay avisos activos en Almería. Si AEMET emite uno, aparecerá aquí y en la página de cada municipio afectado."
+          : "No hay datos de avisos en esta actualización. Mientras tanto, consulta los avisos en la web de AEMET."
+      }
+    </p>
 
     <section aria-labelledby="t-zonas" class="av-seccion">
       <h2 id="t-zonas" class="titular titular-2">Por zonas</h2>
@@ -487,10 +511,11 @@ const jsonLd = {
                 <li
                   class="av-zona"
                   style={p.nivelTodo ? `border-top-color:${VAR_NIVEL[p.nivelAhora ?? p.nivelTodo].borde}` : undefined}
+                  data-zona-card={p.zona.codigo}
                 >
                   <h4 class="av-zona-nombre">{p.zona.nombre}</h4>
                   <p class="av-zona-estado">
-                    <strong>{textoNivel(p.nivelAhora, p.nivelTodo)}</strong>
+                    <strong data-zona-estado>{textoNivel(p.nivelAhora, p.nivelTodo)}</strong>
                     <span class="texto-secundario">
                       {p.zona.tipo === "costa" ? `, ${plural(p.municipios, "municipio con costa", "municipios con costa")}` : `, ${plural(p.municipios, "municipio", "municipios")}`}
                     </span>
@@ -498,8 +523,9 @@ const jsonLd = {
                   {(p.vigentes.length > 0 || p.proximos.length > 0) && (
                     <ul class="av-zona-avisos" role="list">
                       {[...p.vigentes, ...p.proximos].map((a) => (
-                        <li>
-                          <a href={`#${idAviso(a)}`}>{tituloAviso(a)}</a>: {textoCuando(a, ahora).charAt(0).toLowerCase() + textoCuando(a, ahora).slice(1)}
+                        <li data-aviso-ref={idAviso(a)}>
+                          <a href={`#${idAviso(a)}`}>{tituloAviso(a)}</a>:{" "}
+                          <span data-av-ref-cuando>{textoCuando(a, ahora).charAt(0).toLowerCase() + textoCuando(a, ahora).slice(1)}</span>
                         </li>
                       ))}
                     </ul>
@@ -538,13 +564,13 @@ const jsonLd = {
                   const na = nivelMunAhora[m.id] ?? null;
                   const nt = nivelMunTodo[m.id] ?? null;
                   return (
-                    <tr>
+                    <tr data-zonas={zonasMunicipio(m.id)}>
                       <th scope="row">
                         <a href={`${base}${m.slug}/`}>{m.nombre}</a>
                       </th>
                       <td>{z.tierra?.nombre ?? "—"}</td>
                       <td>{z.costa.length ? z.costa.map((c) => nombreZona.get(c.codigo) ?? c.nombre).join("; ") : "No"}</td>
-                      <td>
+                      <td data-mun-nivel>
                         {nt ? (
                           <span class="av-celda-nivel">
                             <span class="av-punto" style={`background:${VAR_NIVEL[na ?? nt].marca};border-color:${VAR_NIVEL[na ?? nt].borde}`} aria-hidden="true" />
@@ -589,7 +615,12 @@ const jsonLd = {
       <p class="texto-largo m-0">
         {ATRIBUCION_AVISOS}: avisos del Plan Meteoalerta para las zonas de Almería.
         {elaborado && ` Boletín elaborado ${elaborado}.`}
-        {datos?.actualizado && ` Descargado el ${textoActualizacion(datos.actualizado)}; se comprueba cada 15 minutos.`}
+        {datos?.actualizado && ` Descargado el ${textoActualizacion(datos.actualizado)}.`}
+        {comprobado && comprobado !== datos?.actualizado && ` Última comprobación de boletín nuevo: ${textoActualizacion(comprobado)}.`}
+        {
+          calculado &&
+            ` Página generada ${calculado}. Al abrirla, tu navegador quita los avisos que ya han terminado y pasa a «en vigor» los que han empezado.`
+        }
         {" "}El aviso oficial es siempre el de AEMET: <a href={URL_AVISOS_AEMET}>avisos de AEMET para Andalucía</a>.
       </p>
     </section>
@@ -600,8 +631,247 @@ const jsonLd = {
   </p>
 </Base>
 
-<style>
-  /* Banda de basalto: estado a la izquierda y mapa a la derecha */
+<script is:inline define:vars={{ AV: datosCliente }}>
+  // Recalcula en el navegador el estado de cada aviso (en vigor, previsto o terminado) con la hora actual y actualiza
+  // la banda, el mapa, las tarjetas, las zonas y la tabla. Si nada ha cambiado desde el build, no toca nada.
+  (function () {
+    var ORDEN = { amarillo: 1, naranja: 2, rojo: 3 };
+    var fmt = new Intl.DateTimeFormat("es-ES", {
+      timeZone: "Europe/Madrid",
+      weekday: "long",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    });
+    // "el domingo 1 a las 02:00" (AEMET termina los avisos a las hh:59:59: se redondea al minuto siguiente)
+    function momento(ms) {
+      var p = {};
+      fmt.formatToParts(new Date(Math.ceil(ms / 60000) * 60000)).forEach(function (x) {
+        p[x.type] = x.value;
+      });
+      var h = p.hour + ":" + p.minute;
+      return "el " + p.weekday + " " + p.day + (h.indexOf("01:") === 0 ? " a la " : " a las ") + h;
+    }
+    function estado(a, t) {
+      return a.fin <= t ? "expirado" : a.inicio <= t ? "vigente" : "proximo";
+    }
+    function maximo(niveles) {
+      var m = null;
+      niveles.forEach(function (n) {
+        if (n && (!m || ORDEN[n] > ORDEN[m])) m = n;
+      });
+      return m;
+    }
+    function textoNivel(na, nt) {
+      if (na) return "Aviso " + na + (nt && nt !== na ? ", " + nt + " previsto" : "");
+      if (nt) return "Aviso " + nt + " previsto";
+      return "Sin aviso";
+    }
+    function todos(sel, f) {
+      document.querySelectorAll(sel).forEach(f);
+    }
+    function plural(n, uno, varios) {
+      return n + " " + (n === 1 ? uno : varios);
+    }
+
+    function actualizar() {
+      var t = Date.now();
+      var cambia = AV.avisos.some(function (a) {
+        return estado(a, t) !== estado(a, AV.calculado);
+      });
+      if (!cambia) return;
+      var vig = AV.avisos.filter(function (a) {
+        return estado(a, t) === "vigente";
+      });
+      var prox = AV.avisos.filter(function (a) {
+        return estado(a, t) === "proximo";
+      });
+      var activos = vig.concat(prox);
+      function deZona(lista, cod) {
+        return maximo(
+          lista
+            .filter(function (a) {
+              return a.zonas.indexOf(cod) >= 0;
+            })
+            .map(function (a) {
+              return a.nivel;
+            })
+        );
+      }
+      var zAhora = {};
+      var zTodo = {};
+      var tipo = {};
+      AV.zonas.forEach(function (z) {
+        zAhora[z.codigo] = deZona(vig, z.codigo);
+        zTodo[z.codigo] = deZona(activos, z.codigo);
+        tipo[z.codigo] = z.tipo;
+      });
+
+      // Tarjetas: fuera las terminadas; las que han empezado pasan a "Avisos en vigor"
+      var ulVig = document.querySelector('[data-av-lista="vigentes"]');
+      var ulProx = document.querySelector('[data-av-lista="proximos"]');
+      AV.avisos.forEach(function (a) {
+        var e = estado(a, t);
+        var li = document.querySelector('[data-aviso="' + a.ancla + '"]');
+        if (li) {
+          li.hidden = e === "expirado";
+          if (e === "vigente" && ulVig && li.parentElement !== ulVig) {
+            ulVig.appendChild(li);
+            var c = li.querySelector("[data-av-cuando]");
+            if (c) c.textContent = "En vigor. Hasta " + momento(a.fin) + ".";
+          }
+        }
+        todos('[data-aviso-ref="' + a.ancla + '"]', function (r) {
+          r.hidden = e === "expirado";
+          var c = r.querySelector("[data-av-ref-cuando]");
+          if (c && e === "vigente") c.textContent = "hasta " + momento(a.fin);
+        });
+      });
+      [ulVig, ulProx].forEach(function (ul) {
+        if (ul) ul.closest("section").hidden = !ul.querySelector("li:not([hidden])");
+      });
+      todos("[data-av-nota-proximos]", function (n) {
+        n.hidden = vig.length > 0;
+      });
+      todos("[data-av-sin]", function (n) {
+        n.hidden = activos.length > 0;
+      });
+      todos(".av-zona-avisos", function (ul) {
+        ul.hidden = !ul.querySelector("li:not([hidden])");
+      });
+
+      // Mapa y zonas
+      todos("path[data-zona]", function (p) {
+        var cod = p.getAttribute("data-zona");
+        var na = zAhora[cod];
+        var nt = zTodo[cod];
+        var costa = tipo[cod] === "costa";
+        var relleno = na ? AV.color[na].oscuro : nt ? "url(#rayado-" + nt + ")" : costa ? null : "#263840";
+        if (relleno) p.setAttribute("fill", relleno);
+        else p.removeAttribute("fill");
+        if (costa) p.classList.toggle("av-costa-sin", !relleno);
+      });
+      todos("[data-zona-rotulo]", function (r) {
+        var cod = r.getAttribute("data-zona-rotulo");
+        r.textContent = textoNivel(zAhora[cod], zTodo[cod]);
+      });
+      var mapa = document.querySelector("[data-av-mapa]");
+      if (mapa) {
+        var desc = AV.zonas.map(function (z) {
+          return z.nombre + ": " + textoNivel(zAhora[z.codigo], zTodo[z.codigo]).toLowerCase();
+        });
+        mapa.setAttribute("aria-label", "Mapa de las zonas de aviso de Almería. " + desc.join(". ") + ".");
+      }
+      todos("[data-zona-card]", function (li) {
+        var cod = li.getAttribute("data-zona-card");
+        var n = zAhora[cod] || zTodo[cod];
+        li.style.borderTopColor = n ? AV.color[n].borde : "";
+        var s = li.querySelector("[data-zona-estado]");
+        if (s) s.textContent = textoNivel(zAhora[cod], zTodo[cod]);
+      });
+
+      // Tabla de municipios: nivel más alto de sus zonas (tierra y costa)
+      var munAhora = 0;
+      var munPrevisto = 0;
+      todos("tr[data-zonas]", function (tr) {
+        var cods = (tr.getAttribute("data-zonas") || "").split(" ").filter(Boolean);
+        var na = maximo(
+          cods.map(function (c) {
+            return zAhora[c];
+          })
+        );
+        var nt = maximo(
+          cods.map(function (c) {
+            return zTodo[c];
+          })
+        );
+        if (na) munAhora++;
+        else if (nt) munPrevisto++;
+        var td = tr.querySelector("[data-mun-nivel]");
+        if (!td) return;
+        var s = document.createElement("span");
+        if (nt) {
+          var n = na || nt;
+          var punto = document.createElement("span");
+          punto.className = "av-punto";
+          punto.setAttribute("aria-hidden", "true");
+          punto.style.background = AV.color[n].marca;
+          punto.style.borderColor = AV.color[n].borde;
+          s.className = "av-celda-nivel";
+          s.appendChild(punto);
+          s.appendChild(document.createTextNode(textoNivel(na, nt)));
+        } else {
+          s.className = "texto-secundario";
+          s.textContent = "Sin aviso";
+        }
+        td.replaceChildren(s);
+      });
+
+      // Banda de estado
+      var nAhora = maximo(
+        vig.map(function (a) {
+          return a.nivel;
+        })
+      );
+      var nTodo = maximo(
+        activos.map(function (a) {
+          return a.nivel;
+        })
+      );
+      var etiqueta = document.querySelector("[data-av-nivel]");
+      if (etiqueta) {
+        etiqueta.classList.toggle("av-nivel-sin", !nTodo);
+        etiqueta.style.background = nTodo ? AV.color[nAhora || nTodo].oscuro : "";
+        etiqueta.style.color = nTodo ? AV.tinta : "";
+        etiqueta.textContent = nTodo ? "Nivel " + (nAhora || nTodo) + (nAhora ? "" : ", previsto") : "Sin avisos";
+      }
+      var partes = [];
+      if (vig.length) partes.push(plural(vig.length, "aviso en vigor", "avisos en vigor"));
+      if (prox.length) partes.push(plural(prox.length, "aviso previsto", "avisos previstos"));
+      var titulo = partes.length ? partes.join(" y ") + " en Almería" : "No hay avisos activos en Almería";
+      var primero = prox.slice().sort(function (a, b) {
+        return a.inicio - b.inicio;
+      })[0];
+      var detalle = !activos.length
+        ? "Los avisos del último boletín descargado ya han terminado."
+        : nAhora
+          ? "Nivel más alto ahora: " + AV.nombre[nAhora].toLowerCase() + ", en " + plural(munAhora, "municipio", "municipios") + " de " + AV.municipios + "."
+          : "Ahora no hay ninguno en vigor. El primero empieza " + momento(primero.inicio) + ".";
+      todos("[data-av-estado]", function (e) {
+        e.textContent = titulo.charAt(0).toUpperCase() + titulo.slice(1) + ".";
+      });
+      todos("[data-av-detalle]", function (e) {
+        e.textContent = detalle;
+      });
+      var zonasCon = AV.zonas.filter(function (z) {
+        return zTodo[z.codigo];
+      }).length;
+      todos("[data-av-zonas]", function (e) {
+        e.textContent = zonasCon + " de " + AV.zonas.length;
+      });
+      todos("[data-av-mun-ahora]", function (e) {
+        e.textContent = munAhora + " de " + AV.municipios;
+      });
+      todos("[data-av-mun-previsto]", function (e) {
+        e.textContent = munPrevisto + " de " + AV.municipios;
+      });
+      todos("[data-av-fila-previsto]", function (e) {
+        e.hidden = munPrevisto === 0;
+      });
+      todos("[data-av-calculado]", function (e) {
+        e.textContent = momento(t).replace(/^el /, "") + ", en tu navegador";
+      });
+    }
+
+    actualizar();
+    setInterval(actualizar, 5 * 60 * 1000);
+  })();
+</script>
+
+<style is:global>
+  /* Global con prefijo av-: la tabla de 103 municipios no repite data-astro-cid en cada celda y el script de arriba
+     puede crear celdas con estas clases. Banda de basalto: estado a la izquierda y mapa a la derecha */
   .av-banda {
     display: flex;
     flex-wrap: wrap;

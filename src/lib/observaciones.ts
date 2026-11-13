@@ -146,6 +146,20 @@ export function horaMadrid(ms: number): string {
   return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}`;
 }
 
+const DIAS_SEMANA = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
+/**
+ * Hora de una lectura ("2026-10-31T13:00", Madrid) en frase: "a las 13:00" si es del mismo día que `ahora` y, si no,
+ * con el día: "el sábado 31 a las 13:00" (no "ayer": la página puede verse horas después de generarse).
+ */
+export function textoHoraLectura(hora: string, ahora: Date = new Date()): string {
+  const h = hora.slice(11, 16);
+  const aLas = `${h.startsWith("01:") ? "a la" : "a las"} ${h}`;
+  const dia = hora.slice(0, 10);
+  if (dia === horaMadrid(ahora.getTime()).slice(0, 10)) return aLas;
+  const d = new Date(`${dia}T12:00:00Z`);
+  return Number.isNaN(d.getTime()) ? aLas : `el ${DIAS_SEMANA[d.getUTCDay()]} ${d.getUTCDate()} ${aLas}`;
+}
+
 // ---------------------------------------------------------------------------------------------
 // Normalización
 // ---------------------------------------------------------------------------------------------

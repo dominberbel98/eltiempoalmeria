@@ -16,6 +16,7 @@ export type FuentesMeta = {
   // Avisos CAP: cuando no hay edición nueva el módulo solo renueva `rss` y se conservan los demás campos.
   avisos: {
     actualizado: string | null /*ISO UTC de la última descarga correcta*/;
+    comprobado?: string | null /*ISO UTC de la última comprobación correcta de si hay boletín nuevo*/;
     elaborado: string | null /*ISO UTC de elaboración del tar*/;
     origen?: "opendata" | "web";
     avisos?: number;
@@ -29,7 +30,7 @@ export type FuentesMeta = {
     reintento?: string | null;
     fallidas?: Record<string, string>;
   };
-  mar: { actualizado: string | null; peso: number; costera?: { elaborado: string | null /*UTC sin Z*/; comprobado: string | null } };
+  mar: { actualizado: string | null; peso: number; costera?: { elaborado: string | null /*UTC sin Z, inicio de validez*/; publicado?: string | null; comprobado: string | null } };
   calima: { actualizado: string | null; peso: number; pasadas?: { europa: string | null; global: string | null } };
 };
 export type Meta = { updatedAt: string; fallosAemet: string[]; fuentes: Partial<FuentesMeta> };

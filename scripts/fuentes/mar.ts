@@ -4,9 +4,13 @@
 // 1. AEMET /prediccion/maritima/costera/costa/47 ("Costa de Andalucía Oriental y Melilla"): boletín FQXX47 con
 //    situación, aviso, tendencia y predicción por subzona. De ella se guardan las aguas costeras de Almería
 //    (subzonas "Costa Sur de Almería" y "Costa Oriental de Almería") y las de la isla de Alborán (término de Almería).
-//    AEMET la elabora al menos dos veces al día con validez de 24 h desde la elaboración (el 31-10-2026 se vieron
-//    ediciones de las 12 y de las 20 UTC). Se comprueba cada 3 h y, cuando la edición guardada tiene 8 h o más, cada
-//    hora hasta que llega la nueva. Unas 13 comprobaciones al día × 2 peticiones = ~26 peticiones AEMET/día.
+//    AEMET la publica al menos dos veces al día con 24 h de validez. Ojo: `origen.elaborado` es el inicio de validez
+//    (igual que `inicio`), no la hora de publicación: el 01-11-2026 la edición "elaborada" a las 12:00 UTC estaba en la
+//    web desde las 10:47 UTC. La hora real de publicación (`publicado`) es el Last-Modified del XML público de la misma
+//    edición (aemet.es/xml/maritima/FQXX47MM.xml, sin clave ni cupo: OpenData no manda Last-Modified) o, si no cuadra,
+//    la hora de la descarga. Se comprueba cada 3 h y, cuando la edición guardada tiene 8 h o más (contadas desde la
+//    publicación), cada hora hasta que llega la nueva. Unas 13 comprobaciones al día × 2 peticiones = ~26 peticiones
+//    AEMET/día, más 1 GET al XML público por edición nueva (2-3 al día).
 // 2. Open-Meteo, TTL 3 h, en serie y con todas las ubicaciones en una sola petición:
 //    a) Marine API (best_match): altura, dirección y periodo de la ola, mar de fondo, mar de viento y temperatura del
 //       agua. 8 variables × 75 h (4 días de peso) → peso 1 por punto → 10.
@@ -18,7 +22,7 @@
 // Nunca lanza: ante un fallo conserva el dato anterior de la parte que falla y devuelve ok=false.
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { ClienteAemet, escribirJson, existe, leerJson, mensajeError, minutosDesde, msElaborado, pedirOpenMeteo, pesoOpenMeteo, toArray } from "./comun";
+import { ClienteAemet, escribirJson, existe, leerJson, mensajeError, minutosDesde, msElaborado, msIso, pedir, pedirOpenMeteo, pesoOpenMeteo, toArray } from "./comun";
 import type { Fuente } from "./tipos";
 
 // --- Parámetros ---
@@ -33,6 +37,8 @@ const HORAS = 75;
 const COSTERA_EDAD_NUEVA_H = 8; // a partir de aquí se espera la edición siguiente
 const COSTERA_REINTENTO_MIN = 60;
 const COSTERA_MAX_SIN_COMPROBAR_MIN = 180;
+/** El mismo boletín en la web de AEMET (sin clave ni cupo), solo para leer su Last-Modified */
+export const URL_XML_COSTERA = "https://www.aemet.es/xml/maritima/FQXX47MM.xml";
 
 /** Variables de la Marine API y su nombre en mar.json */
 export const VARIABLES_MAR = {
@@ -69,11 +75,16 @@ export type PuntoMar = PuntoCostaDef & {
 export type TextoPeriodo = { texto: string; inicio: string | null; fin: string | null };
 export type SubzonaCostera = { id: number; nombre: string; texto: string };
 export type ZonaCostera = { id: number; nombre: string; subzonas: SubzonaCostera[] };
-/** Boletín costero de AEMET, normalizado. Las fechas, como AEMET: UTC sin "Z" ("2026-10-31T12:00:00"). */
+/** Boletín costero de AEMET, normalizado. Las fechas de AEMET, como vienen: UTC sin "Z" ("2026-10-31T12:00:00"). */
 export type CosteraAemet = {
   id: string | null; // "FQXX47"
   nombre: string | null;
+  /** `origen.elaborado` de AEMET: en la práctica es el inicio de validez (igual que `inicio`), no la publicación */
   elaborado: string;
+  /** Publicación real (ISO UTC con Z): Last-Modified del XML público o, si no se pudo leer, la hora de la descarga */
+  publicado?: string | null;
+  /** De dónde sale `publicado`: "web" (Last-Modified) o "descarga" (primera descarga de esta edición) */
+  publicadoOrigen?: "web" | "descarga" | null;
   inicio: string | null;
   fin: string | null;
   aviso: (TextoPeriodo & { nombre: string | null }) | null; // "No hay avisos" o el texto del aviso (toda Andalucía oriental)
@@ -145,6 +156,22 @@ export function normalizarCostera(crudo: unknown): CosteraAemet {
     tendencia: periodo(b.tendencia),
     zonas,
   };
+}
+
+/**
+ * Hora de publicación del boletín: Last-Modified del XML público si trae la misma edición (mismo `elaborado`) y no es
+ * futura; si no, null. Una sola petición, sin reintentos: es un dato secundario.
+ */
+async function publicadoEnWeb(elaborado: string, ahora: Date, log: (m: string) => void): Promise<string | null> {
+  try {
+    const r = await pedir(URL_XML_COSTERA, { intentos: 1, timeoutMs: 15_000, log, etiqueta: "XML costero de aemet.es" });
+    const edicion = /<elaborado>\s*([^<]+?)\s*<\/elaborado>/.exec(r.texto())?.[1];
+    const lm = Date.parse(r.headers.get("last-modified") ?? "");
+    if (edicion !== elaborado || !Number.isFinite(lm) || lm > ahora.getTime() + 60_000) return null;
+    return new Date(lm).toISOString();
+  } catch {
+    return null;
+  }
 }
 
 // --- Open-Meteo ---
@@ -228,7 +255,7 @@ export async function leerPuntosCosta(dirRaiz: string): Promise<PuntoCostaDef[]>
 const VACIO: MarJson = { actualizado: null, horas: [], puntos: [], costera: null, costeraComprobada: null };
 
 export const actualizar: Fuente = async (ctx) => {
-  const ant: { actualizado?: string | null; peso?: number; costera?: { elaborado?: string | null; comprobado?: string | null } } = ctx.meta.fuentes?.mar ?? {};
+  const ant: { actualizado?: string | null; peso?: number; costera?: { elaborado?: string | null; publicado?: string | null; comprobado?: string | null } } = ctx.meta.fuentes?.mar ?? {};
   const ruta = path.join(ctx.dirDatos, "mar.json");
   const previo = await leerJson<MarJson>(ruta, VACIO);
   const datos: MarJson = { ...VACIO, ...previo };
@@ -242,7 +269,10 @@ export const actualizar: Fuente = async (ctx) => {
   // 1. Boletín costero de AEMET
   const comprobadoAnt = ant.costera?.comprobado ?? previo.costeraComprobada ?? null;
   const elaboradoAnt = previo.costera?.elaborado ?? ant.costera?.elaborado ?? null;
-  const edadH = (ctx.ahora.getTime() - msElaborado(elaboradoAnt)) / 3_600_000;
+  // Edad de la edición desde su publicación. `elaborado` es el inicio de validez (puede ser futuro): se toma el más
+  // antiguo de los instantes conocidos (publicado, elaborado y, en datos sin `publicado`, la última comprobación).
+  const instantesEdicion = [msIso(previo.costera?.publicado ?? (previo.costera ? comprobadoAnt : null)), msElaborado(elaboradoAnt)].filter(Number.isFinite);
+  const edadH = instantesEdicion.length ? (ctx.ahora.getTime() - Math.min(...instantesEdicion)) / 3_600_000 : Number.NaN;
   const desdeComprobado = minutosDesde(comprobadoAnt, ctx.ahora);
   const tocaCostera =
     ctx.forzar ||
@@ -251,15 +281,23 @@ export const actualizar: Fuente = async (ctx) => {
     desdeComprobado >= COSTERA_MAX_SIN_COMPROBAR_MIN;
   const reintentoCostera = !ctx.forzar && previo.costera && desdeComprobado < COSTERA_REINTENTO_MIN;
   if (!ctx.aemetKey) notas.push("costera: sin AEMET_API_KEY, se conserva la anterior");
-  else if (!tocaCostera || reintentoCostera) notas.push(`costera vigente (elaborada ${elaboradoAnt ?? "?"} UTC)`);
+  else if (!tocaCostera || reintentoCostera) notas.push(`costera vigente (válida desde ${elaboradoAnt ?? "?"} UTC, ${Number.isFinite(edadH) ? edadH.toFixed(1) : "?"} h)`);
   else {
     try {
       const costera = normalizarCostera(await cliente.json<unknown>(`/prediccion/maritima/costera/costa/${COSTA_AEMET}`));
+      if (previo.costera?.publicado && costera.elaborado === previo.costera.elaborado) {
+        costera.publicado = previo.costera.publicado;
+        costera.publicadoOrigen = previo.costera.publicadoOrigen ?? "descarga";
+      } else {
+        const web = await publicadoEnWeb(costera.elaborado, ctx.ahora, ctx.log);
+        costera.publicado = web ?? ctx.ahora.toISOString();
+        costera.publicadoOrigen = web ? "web" : "descarga";
+      }
       const nueva = costera.elaborado !== elaboradoAnt || JSON.stringify(costera) !== JSON.stringify(previo.costera);
       datos.costera = costera;
       datos.costeraComprobada = ctx.ahora.toISOString();
       cambiado = cambiado || nueva;
-      notas.push(nueva ? `costera nueva (elaborada ${costera.elaborado} UTC)` : "costera sin cambios");
+      notas.push(nueva ? `costera nueva (publicada ${costera.publicado}, ${costera.publicadoOrigen}; válida desde ${costera.elaborado} UTC)` : "costera sin cambios");
     } catch (e) {
       errores.push(`costera: ${mensajeError(e)}`);
     }
@@ -296,7 +334,7 @@ export const actualizar: Fuente = async (ctx) => {
   const metaFuente = {
     actualizado: datos.actualizado,
     peso: pidioOm ? gasto.peso : (ant.peso ?? 0),
-    costera: { elaborado: datos.costera?.elaborado ?? null, comprobado: datos.costeraComprobada },
+    costera: { elaborado: datos.costera?.elaborado ?? null, publicado: datos.costera?.publicado ?? null, comprobado: datos.costeraComprobada },
   };
   return {
     fuente: "mar",

@@ -489,7 +489,15 @@ export const actualizar: Fuente = async (ctx: Ctx): Promise<ResultadoFuente> => 
         ok: true,
         cambiado: false,
         nota: `sin edición nueva (${horaLegible(valido.elaborado)})`,
-        metaFuente: { actualizado: valido.actualizado, elaborado: valido.elaborado, origen: valido.origen, avisos: valido.avisos.length, ...metaRss(true) },
+        metaFuente: {
+          actualizado: valido.actualizado,
+          // Última comprobación correcta de si hay boletín nuevo (la página la enseña: la cadencia real depende del cron)
+          comprobado: ctx.ahora.toISOString(),
+          elaborado: valido.elaborado,
+          origen: valido.origen,
+          avisos: valido.avisos.length,
+          ...metaRss(true),
+        },
       });
     }
 
@@ -546,6 +554,7 @@ export const actualizar: Fuente = async (ctx: Ctx): Promise<ResultadoFuente> => 
       nota: notas.join("; "),
       metaFuente: {
         actualizado: datos.actualizado,
+        comprobado: datos.actualizado,
         elaborado,
         origen: descarga.origen,
         avisos: avisos.length,

@@ -513,9 +513,12 @@ export type SubzonaPagina = SubzonaCostera & {
 
 export type CosteraPagina = {
   id: string | null; // "FQXX47"
-  /** "31 de octubre de 2026 a las 21:00" */
-  elaboradoTexto: string;
-  /** "Del sábado 31 a las 21:00 al domingo 1 a las 21:00" */
+  /**
+   * Cuándo salió el boletín, en frase: "publicado el 1 de noviembre de 2026 a las 11:47" (Last-Modified del XML de
+   * aemet.es), "descargado el …" (si no se pudo leer) o null. Nunca se usa `elaborado`: es el inicio de validez.
+   */
+  publicacionTexto: string | null;
+  /** "Válido del sábado 31 a las 21:00 al domingo 1 a las 21:00" */
   validezTexto: string | null;
   /** La validez no ha terminado */
   vigente: boolean;
@@ -556,11 +559,18 @@ export function costeraPagina(ahora: Date = new Date(), mar: MarJson | null = ge
   const hayAviso = !!avisoTexto && !/^no hay avisos?\.?$/i.test(avisoTexto.trim());
   const tendIni = msAemet(c.tendencia?.inicio);
   const tendFin = msAemet(c.tendencia?.fin);
-  const elaboradoMs = msAemet(c.elaborado);
+  // Datos anteriores a `publicado`: la última comprobación es lo único cierto (el boletín ya estaba publicado entonces)
+  const publicadoMs = Date.parse(c.publicado ?? "");
+  const comprobadoMs = Date.parse(mar?.costeraComprobada ?? "");
+  const publicacionTexto = Number.isFinite(publicadoMs)
+    ? `${c.publicadoOrigen === "web" ? "publicado" : "descargado"} el ${textoActualizacion(new Date(publicadoMs).toISOString())}`
+    : Number.isFinite(comprobadoMs)
+      ? `comprobado por última vez el ${textoActualizacion(new Date(comprobadoMs).toISOString())}`
+      : null;
   return {
     id: c.id,
-    elaboradoTexto: Number.isFinite(elaboradoMs) ? textoActualizacion(new Date(elaboradoMs).toISOString()) : "sin datos",
-    validezTexto: Number.isFinite(tIni) && Number.isFinite(tFin) ? `Del ${diaYHora(tIni)} al ${diaYHora(tFin)}` : null,
+    publicacionTexto,
+    validezTexto: Number.isFinite(tIni) && Number.isFinite(tFin) ? `Válido del ${diaYHora(tIni)} al ${diaYHora(tFin)}` : null,
     vigente: Number.isFinite(tFin) ? tFin > ahora.getTime() : false,
     hayAviso,
     aviso: hayAviso ? avisoTexto : null,
@@ -583,7 +593,7 @@ export type FuenteMar = {
   actualizadoTexto: string;
   /** Más de HORAS_DESFASE_MAR horas sin oleaje nuevo */
   desfasado: boolean;
-  /** "La predicción costera de AEMET se elaboró el 31 de octubre de 2026 a las 21:00." */
+  /** "Boletín en vigor publicado el 1 de noviembre de 2026 a las 11:47; válido del domingo 1 a las 13:00 al lunes 2 a las 13:00." */
   fraseCostera: string | null;
   /** Nombres de los puntos, de oeste a este: "Adra, Balerma… y San Juan de los Terreros" */
   puntosTexto: string;
@@ -595,7 +605,9 @@ export function fuenteMar(ahora: Date = new Date(), mar: MarJson | null = getMar
     actualizado: mar?.actualizado ?? null,
     actualizadoTexto: textoActualizacion(mar?.actualizado),
     desfasado: horasDesde(mar?.actualizado, ahora.getTime()) > HORAS_DESFASE_MAR,
-    fraseCostera: c ? `La predicción costera de AEMET se elaboró el ${c.elaboradoTexto}.` : null,
+    fraseCostera: c
+      ? `${[c.publicacionTexto ? `Boletín en vigor ${c.publicacionTexto}` : "Boletín en vigor", c.validezTexto?.replace(/^V/, "v")].filter(Boolean).join("; ")}.`
+      : null,
     puntosTexto: listaFmt.format((mar?.puntos ?? []).map((p) => p.nombre)),
   };
 }

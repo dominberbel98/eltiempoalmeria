@@ -15,8 +15,9 @@ const ZONA = "Europe/Madrid";
 
 export const ATRIBUCION_PLAYAS = "Predicción de playas: Información elaborada por la Agencia Estatal de Meteorología (AEMET).";
 export const URL_PLAYAS_AEMET = "https://www.aemet.es/es/eltiempo/prediccion/playas";
-/** AEMET elabora la predicción de playas una vez al día, hacia las 08:50 UTC (09:50 en invierno, 10:50 en verano). */
-export const NOTA_ELABORACION = "AEMET elabora la predicción de playas una vez al día, a media mañana, para hoy y los dos días siguientes.";
+/** AEMET suele publicar una edición al día hacia las 08:50 UTC, pero a veces hay otra de noche (el 31/10/2026, a las 23:51 UTC). */
+export const NOTA_ELABORACION =
+  "AEMET elabora la predicción de playas normalmente una vez al día, por la mañana, y a veces otra de noche. Cada edición da hoy y los dos días siguientes.";
 
 // ---------------------------------------------------------------------------------------------
 // Lectura
@@ -24,13 +25,26 @@ export const NOTA_ELABORACION = "AEMET elabora la predicción de playas una vez 
 
 let cache: { mtime: number; datos: PlayasJson } | null = null;
 
-function leerMaestro(): PlayasJson {
+function playasMaestro(): PlayaMaestro[] {
   try {
-    const m = JSON.parse(readFileSync(RUTA_MAESTRO, "utf8")) as MaestroPlayas;
-    return { actualizado: null, playas: (m.playas ?? []).map((p) => ({ ...p, elaborado: null, dias: [] })) };
+    return (JSON.parse(readFileSync(RUTA_MAESTRO, "utf8")) as MaestroPlayas).playas ?? [];
   } catch {
-    return { actualizado: null, playas: [] };
+    return [];
   }
+}
+
+function leerMaestro(): PlayasJson {
+  return { actualizado: null, playas: playasMaestro().map((p) => ({ ...p, elaborado: null, dias: [] })) };
+}
+
+/**
+ * El maestro versionado manda en nombre, municipio y coordenadas: playas.json los copia al descargar y, si el maestro
+ * se corrige, no se renuevan hasta la siguiente edición de AEMET.
+ */
+function conMaestro(datos: PlayasJson): PlayasJson {
+  const porId = new Map(playasMaestro().map((m) => [m.id, m]));
+  if (!porId.size) return datos;
+  return { ...datos, playas: datos.playas.map((p) => (porId.has(p.id) ? { ...p, ...porId.get(p.id) } : p)) };
 }
 
 /** playas.json, o las playas del maestro sin predicción si no existe o no se puede leer. Nunca lanza. */
@@ -39,9 +53,10 @@ export function getPlayas(): PlayasJson {
   try {
     const mtime = statSync(RUTA).mtimeMs;
     if (cache && cache.mtime === mtime) return cache.datos;
-    const datos = JSON.parse(readFileSync(RUTA, "utf8")) as PlayasJson;
-    if (!datos || !Array.isArray(datos.playas) || !datos.playas.length) return leerMaestro();
-    for (const p of datos.playas) if (!Array.isArray(p.dias)) p.dias = [];
+    const crudo = JSON.parse(readFileSync(RUTA, "utf8")) as PlayasJson;
+    if (!crudo || !Array.isArray(crudo.playas) || !crudo.playas.length) return leerMaestro();
+    for (const p of crudo.playas) if (!Array.isArray(p.dias)) p.dias = [];
+    const datos = conMaestro(crudo);
     cache = { mtime, datos };
     return datos;
   } catch {
@@ -203,7 +218,8 @@ export function fraseMar(d: DiaPlaya | null | undefined): string | null {
 export type EstadoMar = "buena" | "regular" | "mala" | "sin-datos";
 
 export const TEXTO_ESTADO_MAR: Record<EstadoMar, string> = {
-  buena: "Mar en calma",
+  // No "en calma": en la escala Douglas de /mar/ la calma es ola de 0 m, y la ficha da la ola del modelo al lado
+  buena: "Mar tranquila",
   regular: "Mar movida",
   mala: "Mar fuerte",
   "sin-datos": "Sin predicción",
@@ -238,7 +254,7 @@ export type ResumenPlaya = {
   dia: DiaPlaya | null; // el de la fecha pedida (o el primero vigente si se pide hoy y no hay)
   fecha: string | null;
   estado: EstadoMar;
-  estadoTexto: string; // "Mar en calma"
+  estadoTexto: string; // "Mar tranquila"
   puntuacion: number | null; // 6-18, menor es mejor
   cielo: string | null; // "Despejado por la mañana y nuboso por la tarde"
   icono: Cielo | null; // el de la tarde si cambia, que es cuando más se va a la playa

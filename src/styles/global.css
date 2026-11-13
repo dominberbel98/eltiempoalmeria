@@ -760,7 +760,9 @@
       font: inherit;
       cursor: pointer;
     }
-    .nav-mas-boton.actual {
+    /* Misma especificidad que html.js .nav-mas-boton (que pone font: inherit) y detrás de ella */
+    .nav-mas-boton.actual,
+    html.js .nav-mas-boton.actual {
       font-weight: 700;
     }
     .nav-mas-boton svg {
@@ -876,6 +878,8 @@
   .pie-secciones a {
     display: inline-flex;
     align-items: center;
+    justify-content: center;
+    min-width: 44px;
     min-height: 44px;
     font-size: 15px;
     font-weight: 600;

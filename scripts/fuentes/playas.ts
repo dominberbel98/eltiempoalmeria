@@ -23,8 +23,12 @@
 // Lista de playas (scripts/playas-almeria.json, versionado): sale del fichero maestro de AEMET
 // https://www.aemet.es/documentos/es/eltiempo/prediccion/playas/Playas_codigos.csv (ISO-8859-1, separador ";",
 // coordenadas en grados, minutos y segundos), filtrado a ID_PROVINCIA = 04 y cruzado con scripts/municipios-almeria.json.
+// Al generarlo se corrigen a mano las coordenadas erróneas del CSV (CORRECCIONES_PLAYAS) y el municipio pasa a ser el
+// término (public/municipios.geojson) en el que cae la playa (si cae en el mar, el de AEMET): AEMET mantiene códigos
+// anteriores a la segregación de Balanegra (2015). Una playa a más de 2 km de su término detiene la generación.
 // Se regenera a mano, sin clave y sin gastar cupo de OpenData, si AEMET añade o quita playas:
 //   npx tsx scripts/fuentes/playas.ts --maestro
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
@@ -66,8 +70,11 @@ const MAX_FALLOS_PLAYA_SEGUIDOS = 3; // de playa (p. ej. 404 en varias seguidas)
 /** Municipio de una playa: id INE de 5 dígitos y slug de src/data/municipios.json. */
 export type MunicipioPlaya = { id: string; slug: string; nombre: string };
 
-/** Una playa de scripts/playas-almeria.json. `id` es el código AEMET de 7 dígitos (provincia, municipio y orden). */
-export type PlayaMaestro = { id: string; nombre: string; slug: string; municipio: MunicipioPlaya; lat: number; lon: number };
+/**
+ * Una playa de scripts/playas-almeria.json. `id` es el código AEMET de 7 dígitos (provincia, municipio y orden: el
+ * municipio del código puede no ser el de `municipio`). `nota` explica en qué se aparta del CSV de AEMET.
+ */
+export type PlayaMaestro = { id: string; nombre: string; slug: string; municipio: MunicipioPlaya; lat: number; lon: number; nota?: string };
 
 export type MaestroPlayas = { _comentario: string; fuente: string; generado: string; playas: PlayaMaestro[] };
 
@@ -434,6 +441,56 @@ export function gradosDecimales(dms: string): number | null {
   return Math.round((s.startsWith("-") ? -abs : abs) * 1e5) / 1e5;
 }
 
+/** Coordenadas del CSV de AEMET que están mal, con el motivo (se comprueban con public/municipios.geojson). */
+export const CORRECCIONES_PLAYAS: Record<string, { lat?: number; lon?: number; nota: string }> = {
+  "0400308": {
+    lon: -3.01833,
+    nota:
+      "El CSV de AEMET da la longitud -03º 11' 06\", 5 km al oeste del término de Adra, ya en Granada. Se usa -03º 01' 06\", junto a los Jardines de Poniente de Adra (errata de un dígito).",
+  },
+};
+const MAX_KM_TERMINO = 2;
+
+type Anillo = [number, number][];
+type TerminoGeo = { id: string; poligonos: Anillo[][] };
+
+async function leerTerminosGeo(dirRaiz: string): Promise<TerminoGeo[]> {
+  const g = JSON.parse(await readFile(path.join(dirRaiz, "public", "municipios.geojson"), "utf8")) as {
+    features: { properties: { id: string }; geometry: { type: string; coordinates: unknown } }[];
+  };
+  return g.features.map((f) => ({
+    id: String(f.properties.id),
+    poligonos: (f.geometry.type === "Polygon" ? [f.geometry.coordinates] : f.geometry.coordinates) as Anillo[][],
+  }));
+}
+function enAnillo([x, y]: [number, number], anillo: Anillo): boolean {
+  let d = false;
+  for (let i = 0, j = anillo.length - 1; i < anillo.length; j = i++) {
+    const [xi, yi] = anillo[i];
+    const [xj, yj] = anillo[j];
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) d = !d;
+  }
+  return d;
+}
+const enTermino = (p: [number, number], t: TerminoGeo) => t.poligonos.some((pol) => enAnillo(p, pol[0]) && !pol.slice(1).some((h) => enAnillo(p, h)));
+/** Distancia aproximada (km) de un punto al borde de un término (0 si está dentro). */
+function kmATermino(p: [number, number], t: TerminoGeo): number {
+  if (enTermino(p, t)) return 0;
+  const cos = Math.cos((p[1] * Math.PI) / 180);
+  let min = Number.POSITIVE_INFINITY;
+  for (const pol of t.poligonos)
+    for (const an of pol)
+      for (let i = 1; i < an.length; i++) {
+        const dx = (an[i][0] - an[i - 1][0]) * cos;
+        const dy = an[i][1] - an[i - 1][1];
+        const px = (p[0] - an[i - 1][0]) * cos;
+        const py = p[1] - an[i - 1][1];
+        const k = Math.max(0, Math.min(1, (px * dx + py * dy) / (dx * dx + dy * dy || 1)));
+        min = Math.min(min, Math.hypot(px - k * dx, py - k * dy) * 111.32);
+      }
+  return min;
+}
+
 export async function generarMaestro(dirRaiz: string, log: (m: string) => void = console.log): Promise<MaestroPlayas> {
   const r = await pedir(URL_MAESTRO_PLAYAS, { intentos: 3, timeoutMs: 30_000, log });
   const lineas = decodificarMixto(r.bytes).split(/\r?\n/).filter((l) => l.trim());
@@ -452,18 +509,35 @@ export async function generarMaestro(dirRaiz: string, log: (m: string) => void =
     lon: col("LONGITUD"),
   };
   const municipios = new Map((await municipiosDesdeSemilla(dirRaiz)).map((m) => [m.id, m]));
+  const terminos = await leerTerminosGeo(dirRaiz);
   const playas: PlayaMaestro[] = [];
   for (const l of lineas.slice(1)) {
     const f = l.split(";").map((x) => x.trim());
     if (f[c.provincia]?.padStart(2, "0") !== PROVINCIA) continue;
     const id = f[c.id].padStart(7, "0");
     const idMun = f[c.municipio].padStart(5, "0");
-    const m = municipios.get(idMun);
-    const lat = gradosDecimales(f[c.lat] ?? "");
-    const lon = gradosDecimales(f[c.lon] ?? "");
-    if (!m) throw new Error(`playa ${id}: el municipio ${idMun} no está en scripts/municipios-almeria.json`);
+    const corr = CORRECCIONES_PLAYAS[id];
+    const lat = corr?.lat ?? gradosDecimales(f[c.lat] ?? "");
+    const lon = corr?.lon ?? gradosDecimales(f[c.lon] ?? "");
+    if (!municipios.get(idMun)) throw new Error(`playa ${id}: el municipio ${idMun} no está en scripts/municipios-almeria.json`);
     if (lat == null || lon == null) throw new Error(`playa ${id}: coordenadas no válidas (${f[c.lat]}; ${f[c.lon]})`);
-    playas.push({ id, nombre: f[c.nombre], slug: "", municipio: { id: m.id, slug: m.slug, nombre: m.nombre }, lat, lon });
+    // Término en el que cae la playa. Si cae en el mar (la costa simplificada del IGN va unos metros tierra adentro), se
+    // queda el de AEMET: elegir el más cercano equivocaría las playas junto a un límite (Pozo del Esparto y Pulpí).
+    const punto: [number, number] = [lon, lat];
+    const idReal = terminos.find((t) => enTermino(punto, t))?.id ?? idMun;
+    const termino = terminos.find((t) => t.id === idReal);
+    const km = termino ? kmATermino(punto, termino) : Number.POSITIVE_INFINITY;
+    if (km > MAX_KM_TERMINO) throw new Error(`playa ${id} (${f[c.nombre]}): a ${km.toFixed(1)} km del término de su municipio; revisa CORRECCIONES_PLAYAS`);
+    const m = municipios.get(idReal);
+    if (!m) throw new Error(`playa ${id}: el término ${idReal} no está en scripts/municipios-almeria.json`);
+    const notas = [corr?.nota];
+    if (idReal !== idMun) {
+      const nombreAemet = municipios.get(idMun)?.nombre ?? idMun;
+      notas.push(`AEMET la asigna a ${nombreAemet} (${idMun}), pero está en el término de ${m.nombre} (${m.id}).`);
+      log(`  playa ${id} (${f[c.nombre]}): ${nombreAemet} -> ${m.nombre}`);
+    }
+    const nota = notas.filter(Boolean).join(" ");
+    playas.push({ id, nombre: f[c.nombre], slug: "", municipio: { id: m.id, slug: m.slug, nombre: m.nombre }, lat, lon, ...(nota ? { nota } : {}) });
   }
   if (playas.length < 10) throw new Error(`solo ${playas.length} playas de Almería en el maestro`);
   playas.sort((a, b) => a.municipio.nombre.localeCompare(b.municipio.nombre, "es") || a.nombre.localeCompare(b.nombre, "es"));
@@ -478,7 +552,7 @@ export async function generarMaestro(dirRaiz: string, log: (m: string) => void =
   }
   const maestro: MaestroPlayas = {
     _comentario:
-      "Playas de AEMET de la provincia de Almería (fichero maestro Playas_codigos.csv, ID_PROVINCIA = 04) con el municipio de scripts/municipios-almeria.json. Se regenera con: npx tsx scripts/fuentes/playas.ts --maestro",
+      "Playas de AEMET de la provincia de Almería (fichero maestro Playas_codigos.csv, ID_PROVINCIA = 04) con el término municipal en el que caen (public/municipios.geojson) y las coordenadas corregidas donde el CSV está mal (campo nota). Se regenera con: npx tsx scripts/fuentes/playas.ts --maestro",
     fuente: URL_MAESTRO_PLAYAS,
     generado: new Date().toISOString().slice(0, 10),
     playas,

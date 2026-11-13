@@ -198,9 +198,12 @@ export const actualizar: Fuente = async (ctx) => {
     if (sinDatos > municipios.length * 0.2) throw new Error(`${sinDatos} municipios sin serie de polvo`);
 
     const actualizado = ctx.ahora.toISOString();
-    const pasadas = { europa: iso(europa?.init) ?? pasadasAnt.europa ?? null, global: iso(global?.init) ?? pasadasAnt.global ?? null };
+    // Solo se registra una pasada que ya se ha dado por lista (margen de publicación cumplido): si la de meta.json
+    // es más nueva pero aún no lo está, puede que estos datos no la traigan y la ejecución siguiente debe volver a pedir.
+    const pasadas = { europa: iso(eu?.init) ?? pasadasAnt.europa ?? null, global: iso(gl?.init) ?? pasadasAnt.global ?? null };
     // data_end_time es exclusivo: la última hora con dato de CAMS Europa es la anterior
-    const finEuropa = europa ? horaMadrid(new Date(europa.fin - 3_600_000)) : null;
+    const finDe = (m: MetaCams) => horaMadrid(new Date(m.fin - 3_600_000));
+    const finEuropa = eu ? finDe(eu) : (previo?.finEuropa ?? (europa ? finDe(europa) : null));
     const archivo: CalimaJson = { actualizado, pasadas, finEuropa, horas, puntos };
     await escribirJson(ruta, archivo);
     return {

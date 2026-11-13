@@ -9,7 +9,7 @@ import ObservacionesTabla from "../components/ObservacionesTabla.astro";
 import ObservacionesSerie from "../components/ObservacionesSerie.astro";
 import { fmtGrados, fmtKmh, fmtLluvia } from "../components/mapa/escalas";
 import { getMeta } from "../lib/datos";
-import { MINUTOS_ATRASO, getEstaciones, resumenObservaciones, textoAntiguedad, type ExtremoProvincia } from "../lib/observaciones";
+import { MINUTOS_ATRASO, getEstaciones, resumenObservaciones, textoAntiguedad, textoHoraLectura, type ExtremoProvincia } from "../lib/observaciones";
 import { rumbo, textoActualizacion } from "../lib/tiempo";
 import { unirNombres } from "../lib/agro";
 
@@ -24,11 +24,8 @@ const atrasado = r.edadMin > MINUTOS_ATRASO;
 const atrasadas = estaciones.filter((e) => e.atrasada);
 const sinViento = estaciones.filter((e) => e.serie.length && e.serie.every((l) => l.viento == null && l.racha == null)).map((e) => e.nombre);
 
-const hora = (v: { hora: string } | null) => {
-  if (!v) return "";
-  const h = v.hora.slice(11, 16);
-  return `${h.startsWith("01:") ? "a la" : "a las"} ${h}`;
-};
+// "a las 13:00" o, si no es de hoy, "el sábado 31 a las 13:00"
+const hora = (v: { hora: string } | null) => (v ? textoHoraLectura(v.hora, ahora) : "");
 const ultimoDato = r.ultimoDato ? estaciones.flatMap((e) => (e.ultima && e.ultima.fint === r.ultimoDato ? [e.ultima] : []))[0] ?? null : null;
 const horaUltimo = ultimoDato ? hora(ultimoDato) : null;
 const donde = (x: ExtremoProvincia | null) => (x ? `${x.estacion.nombre}, ${hora(x)}` : "Sin datos");

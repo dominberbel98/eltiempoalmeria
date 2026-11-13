@@ -34,9 +34,24 @@ function lineas(valor: (h: HoraProvincia) => number | null): string[] {
 const lineaMax = lineas((h) => h.max);
 const lineaMediana = lineas((h) => h.mediana);
 
+// Rótulo de cada umbral: encima de la línea, a la derecha, a la izquierda o debajo, donde no tape la serie. Ocupa
+// ~20 % del ancho en un extremo y una franja de ~12 % del eje por encima (o por debajo) de la línea.
+type Lado = "dcha" | "izda";
+type Posicion = { lado: Lado; debajo: boolean };
+function posicionRotulo(valor: number): Posicion {
+  const ventana = Math.max(1, Math.ceil(n * 0.2));
+  const franja = tope * 0.12;
+  const enLado = (lado: Lado) => serie.slice(lado === "dcha" ? n - ventana : 0, lado === "dcha" ? n : ventana);
+  const choca = (lado: Lado, debajo: boolean) =>
+    enLado(lado).some((h) =>
+      [h.max, h.mediana].some((v) => v != null && (debajo ? v <= valor + tope * 0.02 && v >= valor - franja : v >= valor - tope * 0.02 && v <= valor + franja))
+    );
+  for (const debajo of [false, true]) for (const lado of ["dcha", "izda"] as Lado[]) if (!choca(lado, debajo)) return { lado, debajo };
+  return { lado: "dcha", debajo: false };
+}
 const umbrales = ESCALA_CALIMA.slice(1)
   .filter((nv) => nv.desde < tope)
-  .map((nv) => ({ valor: nv.desde, nombre: nv.nombre, top: `${y(nv.desde)}%` }));
+  .map((nv) => ({ valor: nv.desde, nombre: nv.nombre, top: `${y(nv.desde)}%`, ...posicionRotulo(nv.desde) }));
 const ahoraLocal = serie[0]?.t ?? "";
 // En móvil, el día abreviado ("Mié 4") para que los rótulos no se pisen
 const corta = (fecha: string, ahora: string) => {
@@ -87,7 +102,7 @@ const dias = [0, ...medianoches]
             ))}
           </svg>
           {umbrales.map((u) => (
-            <span class="cg-umbral-txt" style={`top:${u.top}`}>
+            <span class:list={["cg-umbral-txt", u.lado === "izda" ? "cg-umbral-izda" : "cg-umbral-dcha", { "cg-umbral-debajo": u.debajo }]} style={`top:${u.top}`}>
               {u.nombre}
             </span>
           ))}
@@ -168,13 +183,27 @@ const dias = [0, ...medianoches]
     stroke-dasharray: 6 4;
     stroke-linejoin: round;
   }
+  /* Sin caja opaca: si aun así coincide con la serie, la línea se sigue viendo bajo el halo del texto */
   .cg-umbral-txt {
     position: absolute;
-    right: 4px;
     transform: translateY(-115%);
+    padding: 0 2px;
     font-size: 13px;
+    line-height: 1.2;
     color: var(--color-ceniza);
-    background: var(--color-blanco);
-    padding: 0 4px;
+    text-shadow:
+      0 0 2px var(--color-blanco),
+      0 0 2px var(--color-blanco),
+      0 0 3px var(--color-blanco);
+    pointer-events: none;
+  }
+  .cg-umbral-dcha {
+    right: 4px;
+  }
+  .cg-umbral-izda {
+    left: 4px;
+  }
+  .cg-umbral-debajo {
+    transform: translateY(15%);
   }
 </style>

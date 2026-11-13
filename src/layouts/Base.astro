@@ -29,9 +29,11 @@ type Props = {
   ancho?: "contenedor" | "completo";
   // Añade al pie la atribución de la Red de Información Agroclimática (RIA) de Andalucía
   ria?: boolean;
+  // Página que no debe indexarse ni tener canonical ni og:url (la 404: GitHub Pages la sirve en cualquier ruta)
+  noindex?: boolean;
 };
 
-const { title, description, jsonLd, activo, ancho = "contenedor", ria = false } = Astro.props;
+const { title, description, jsonLd, activo, ancho = "contenedor", ria = false, noindex = false } = Astro.props;
 const base = import.meta.env.BASE_URL;
 const meta = getMeta();
 const canonical = new URL(Astro.url.pathname, Astro.site).href;
@@ -57,6 +59,8 @@ const mas: EnlaceSeccion[] = [
 // "page" si el enlace es esta misma página; "true" si es la sección a la que pertenece (p. ej. un municipio en Previsión)
 const actual = (s: EnlaceSeccion) => (s.id !== activo ? undefined : Astro.url.pathname === s.href ? "page" : "true");
 const masActivo = mas.some((s) => s.id === activo);
+// Con el desplegable cerrado, el aria-current de la sección no se oye: el botón dice en cuál estás
+const seccionEnMas = mas.find((s) => s.id === activo)?.texto ?? null;
 
 // Aviso si el dato más reciente tiene más de 2 h. Se calcula en el build y se repite en el navegador,
 // por si la página publicada se queda sin regenerar.
@@ -72,7 +76,7 @@ const jsonLdTexto = jsonLd ? JSON.stringify(jsonLd).replace(/</g, "\\u003c") : n
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{title}</title>
     <meta name="description" content={description} />
-    <link rel="canonical" href={canonical} />
+    {noindex ? <meta name="robots" content="noindex" /> : <link rel="canonical" href={canonical} />}
     <link rel="preload" href={archivoLatin} as="font" type="font/woff2" crossorigin />
     <link rel="icon" type="image/svg+xml" href={`${base}favicon.svg`} />
     <link rel="sitemap" href={`${base}sitemap-index.xml`} />
@@ -82,7 +86,7 @@ const jsonLdTexto = jsonLd ? JSON.stringify(jsonLd).replace(/</g, "\\u003c") : n
     <meta property="og:site_name" content="El tiempo en Almería" />
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
-    <meta property="og:url" content={canonical} />
+    {!noindex && <meta property="og:url" content={canonical} />}
     <meta name="twitter:card" content="summary" />
     {jsonLdTexto && <script type="application/ld+json" set:html={jsonLdTexto} />}
     <script is:inline>document.documentElement.classList.add("js");</script>
@@ -135,7 +139,7 @@ const jsonLdTexto = jsonLd ? JSON.stringify(jsonLd).replace(/</g, "\\u003c") : n
               aria-controls="menu-mas"
               data-despliega="mas"
             >
-              Más<span class="sr-only"> secciones</span>
+              Más<span class="sr-only"> secciones{seccionEnMas && ` (estás en ${seccionEnMas})`}</span>
               <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
                 <path d="m2.5 4.5 3.5 3.5 3.5-3.5" />
               </svg>

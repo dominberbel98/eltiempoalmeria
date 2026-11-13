@@ -224,4 +224,11 @@ const idTitulo = "titulo-semana";
       font-size: 16px;
     }
   }
+  /* Tableta (768-1023 px): los mínimos de arriba suman 800 px y no caben en 704; columnas más flexibles */
+  @media (min-width: 48rem) and (max-width: 63.99rem) {
+    .semana-dia {
+      grid-template-columns: minmax(110px, 150px) minmax(0, 1fr) minmax(150px, 1.2fr) 64px auto;
+      gap: 16px;
+    }
+  }
 </style>

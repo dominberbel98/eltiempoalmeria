@@ -71,14 +71,16 @@ const jsonLd = {
                 <a href={`${base}comarcas/${c.slug}/`}>{c.nombre}</a>
               </h3>
               <p class="comarcas-grupo-desc">{c.descripcion}</p>
-              <p class="comarcas-grupo-lista">
-                {municipiosDeComarca(c).map((m, i, lista) => (
-                  <>
-                    <a href={`${base}${m.slug}/`}>{m.nombre}</a>
-                    {i < lista.length - 1 ? ", " : "."}
-                  </>
+              {/* Lista con objetivos de 44 px de alto (utilidades: sin data-astro-cid en los 103 enlaces) */}
+              <ul class="m-0 flex list-none flex-wrap gap-x-4 p-0" role="list" aria-label={`Municipios de ${c.nombre}`}>
+                {municipiosDeComarca(c).map((m) => (
+                  <li>
+                    <a class="inline-flex min-h-11 items-center" href={`${base}${m.slug}/`}>
+                      {m.nombre}
+                    </a>
+                  </li>
                 ))}
-              </p>
+              </ul>
             </section>
           ))
         }
@@ -192,9 +194,6 @@ const jsonLd = {
   .comarcas-grupo-desc {
     font-size: 15px;
     color: var(--color-ceniza);
-  }
-  .comarcas-grupo-lista {
-    line-height: 1.9;
   }
   .comarcas-fuente {
     display: flex;

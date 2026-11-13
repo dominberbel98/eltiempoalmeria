@@ -1,7 +1,7 @@
 {
-  "_comentario": "Playas de AEMET de la provincia de Almería (fichero maestro Playas_codigos.csv, ID_PROVINCIA = 04) con el municipio de scripts/municipios-almeria.json. Se regenera con: npx tsx scripts/fuentes/playas.ts --maestro",
+  "_comentario": "Playas de AEMET de la provincia de Almería (fichero maestro Playas_codigos.csv, ID_PROVINCIA = 04) con el término municipal en el que caen (public/municipios.geojson) y las coordenadas corregidas donde el CSV está mal (campo nota). Se regenera con: npx tsx scripts/fuentes/playas.ts --maestro",
   "fuente": "https://www.aemet.es/documentos/es/eltiempo/prediccion/playas/Playas_codigos.csv",
-  "generado": "2026-10-31",
+  "generado": "2026-11-01",
   "playas": [
     {
       "id": "0400308",
@@ -13,7 +13,8 @@
         "nombre": "Adra"
       },
       "lat": 36.74417,
-      "lon": -3.185
+      "lon": -3.01833,
+      "nota": "El CSV de AEMET da la longitud -03º 11' 06\", 5 km al oeste del término de Adra, ya en Granada. Se usa -03º 01' 06\", junto a los Jardines de Poniente de Adra (errata de un dígito)."
     },
     {
       "id": "0400309",
@@ -68,12 +69,13 @@
       "nombre": "Berja-Balanegra",
       "slug": "berja-balanegra",
       "municipio": {
-        "id": "04029",
-        "slug": "berja",
-        "nombre": "Berja"
+        "id": "04904",
+        "slug": "balanegra",
+        "nombre": "Balanegra"
       },
       "lat": 36.7475,
-      "lon": -2.91056
+      "lon": -2.91056,
+      "nota": "AEMET la asigna a Berja (04029), pero está en el término de Balanegra (04904)."
     },
     {
       "id": "0403203",

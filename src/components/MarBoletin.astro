@@ -119,8 +119,8 @@ const listaFmt = new Intl.ListFormat("es", { style: "long", type: "conjunction" 
 
       <div class="flex flex-col gap-1">
         <p class="nota">
-          Boletín {c.id ?? "costero"} de AEMET elaborado el {c.elaboradoTexto}.{c.validezTexto && ` ${c.validezTexto}.`} Información
-          elaborada por la Agencia Estatal de Meteorología.
+          Boletín {c.id ?? "costero"} de AEMET{c.publicacionTexto && `, ${c.publicacionTexto}`}.{c.validezTexto && ` ${c.validezTexto}.`}{" "}
+          Información elaborada por la Agencia Estatal de Meteorología.
         </p>
         <a href={URL_AEMET_MARITIMA} class="inline-flex min-h-[44px] items-center self-start text-[15px]">Predicción marítima en aemet.es</a>
       </div>
