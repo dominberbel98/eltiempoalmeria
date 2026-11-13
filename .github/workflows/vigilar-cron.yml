@@ -1,0 +1,36 @@
+# .github/workflows/vigilar-cron.yml
+# Vigila el cron externo (Cloudflare Worker de cron/), que dispara deploy.yml cada 15 min con workflow_dispatch.
+# Si lleva más de 2 h sin disparar (token caducado o revocado, Worker caído…), este workflow falla y GitHub manda
+# el correo de "run failed" al propietario. Sin él, la web volvería a actualizarse 3-5 veces al día sin avisar.
+name: Vigilar el cron externo
+
+on:
+  workflow_dispatch:
+  schedule:
+    # GitHub lanza los schedule con mucho retraso: con cuatro al día basta para enterarse en unas horas
+    - cron: "13 1,7,13,19 * * *"
+
+permissions:
+  actions: read
+
+jobs:
+  vigilar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Comprobar el último disparo del cron externo
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MAX_HORAS: "2"
+        run: |
+          ultimo=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/deploy.yml/runs?event=workflow_dispatch&per_page=1" --jq '.workflow_runs[0].created_at // empty')
+          if [ -z "$ultimo" ]; then
+            echo "::error::No hay ninguna ejecución de deploy.yml lanzada por el cron externo."
+            exit 1
+          fi
+          minutos=$(( ( $(date -u +%s) - $(date -u -d "$ultimo" +%s) ) / 60 ))
+          echo "Último disparo del cron externo: $ultimo (hace $minutos min)"
+          if [ "$minutos" -gt $(( MAX_HORAS * 60 )) ]; then
+            echo "::error::El cron externo lleva $minutos min sin disparar deploy.yml (último: $ultimo). Revisa el Worker cron-eltiempoalmeria en Cloudflare y el token de GitHub de su secreto GH_TOKEN (puede haber caducado o estar revocado)."
+            exit 1
+          fi
